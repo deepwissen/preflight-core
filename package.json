@@ -1,0 +1,57 @@
+{
+  "name": "@deepwissen/preflight-core",
+  "version": "0.1.0",
+  "description": "Shared detection engine for AI Preflight — secret, trap-file, instruction-integrity, and MCP-config scanners. Pure TypeScript, zero platform dependencies.",
+  "license": "MIT",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/deepwissen/preflight-core.git"
+  },
+  "homepage": "https://github.com/deepwissen/preflight-core#readme",
+  "bugs": {
+    "url": "https://github.com/deepwissen/preflight-core/issues"
+  },
+  "keywords": [
+    "ai",
+    "security",
+    "secret-scanning",
+    "static-analysis",
+    "mcp",
+    "preflight"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "build": "tsc",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "lint": "eslint src/ --ext .ts",
+    "format": "prettier --write \"src/**/*.ts\"",
+    "format:check": "prettier --check \"src/**/*.ts\"",
+    "typecheck": "tsc --noEmit",
+    "prepublishOnly": "npm run build"
+  },
+  "devDependencies": {
+    "@types/node": "^20.11.0",
+    "@typescript-eslint/eslint-plugin": "^7.0.0",
+    "@typescript-eslint/parser": "^7.0.0",
+    "@vitest/coverage-v8": "^4.1.0",
+    "eslint": "^8.57.0",
+    "prettier": "^3.2.0",
+    "typescript": "^5.4.0",
+    "vitest": "^4.1.0"
+  }
+}
