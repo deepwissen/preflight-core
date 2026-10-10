@@ -1,0 +1,8 @@
+# vet allowlist — benign structural matches, not real exposures.
+# (gitignore syntax: comments must be on their own line, not trailing.)
+
+# detector test fixtures
+test/
+
+# compiled output (mirrors src)
+dist/
