@@ -7,4 +7,9 @@ export { detectTraps } from "./trap-scanner.js";
 export { scoreRisk } from "./risk-scorer.js";
 export { detectPositiveSignals } from "./positive-signals.js";
 export { detectToolAwareIssues } from "./tool-aware-analyzer.js";
-export { analyzePrompt } from "./prompt-analyzer.js";
+export { analyzePrompt, extractIntentKeywords } from "./prompt-analyzer.js";
+export {
+  rankWorkspaceMatches,
+  groupWorkspaceMatches,
+  formatMatchReason,
+} from "./workspace-ranker.js";

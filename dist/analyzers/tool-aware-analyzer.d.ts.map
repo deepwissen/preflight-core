@@ -1,0 +1,1 @@
+{"version":3,"file":"tool-aware-analyzer.d.ts","sourceRoot":"","sources":["../../src/analyzers/tool-aware-analyzer.ts"],"names":[],"mappings":"AAAA,OAAO,KAAK,EACV,cAAc,EACd,eAAe,EAMhB,MAAM,aAAa,CAAC;AAKrB;;;;;;;;;;;;GAYG;AACH,wBAAgB,qBAAqB,CACnC,OAAO,EAAE,eAAe,EACxB,OAAO,EAAE,OAAO,CAAC,cAAc,CAAC,GAC/B,OAAO,CAAC,cAAc,CAAC,CAoEzB"}

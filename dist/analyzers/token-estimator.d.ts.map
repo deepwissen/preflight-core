@@ -1,0 +1,1 @@
+{"version":3,"file":"token-estimator.d.ts","sourceRoot":"","sources":["../../src/analyzers/token-estimator.ts"],"names":[],"mappings":"AAAA,OAAO,KAAK,EACV,cAAc,EACd,eAAe,EAMhB,MAAM,aAAa,CAAC;AAGrB;;;;;;GAMG;AACH,wBAAgB,cAAc,CAC5B,OAAO,EAAE,eAAe,EACxB,QAAQ,EAAE,OAAO,CAAC,cAAc,CAAC,GAChC,OAAO,CAAC,cAAc,CAAC,CA2BzB"}
