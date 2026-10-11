@@ -786,3 +786,55 @@ describe("shannonEntropy", () => {
     expect(entropy).toBeGreaterThan(3.5);
   });
 });
+
+// Regressions from dogfooding vet on a real repo: 21/21 warnings were false
+// positives — generated SVG/asset entropy, inline CSS/JS entropy, and a keyword
+// match on a field *name* whose value wasn't a literal secret.
+describe("scanSecrets — false-positive guards", () => {
+  const scan = (content: string, path = "src/app.ts") =>
+    scanSecrets(makeSnapshot({ activeFile: fileWithContent(content, path) }), {}).secretFindings ??
+    [];
+
+  describe("entropy — generated/asset files and markup", () => {
+    it("skips the entropy layer for SVG files", () => {
+      const svg = `<svg><path d="M10,20C30,40,${"ABCdef123GHIjkl456MNOpqr".repeat(4)}"/></svg>`;
+      expect(scan(svg, "docs/diagram.svg")).toHaveLength(0);
+    });
+
+    it("skips minified bundles and source maps", () => {
+      const blob = `x="${"aB3xY7zQ9wE2rT5uI8".repeat(6)}"`;
+      expect(scan(blob, "dist/app.min.js")).toHaveLength(0);
+      expect(scan(blob, "dist/app.js.map")).toHaveLength(0);
+    });
+
+    it("does not flag inline CSS/path data (structural punctuation) in source files", () => {
+      const html = `<div style="fill:#a1b2c3;stroke:#d4e5f6;transform:matrix(1,0,0,1,${"X9y8Z7w6".repeat(4)})"></div>`;
+      expect(scan(html, "public/index.html")).toHaveLength(0);
+    });
+
+    it("STILL flags a genuine high-entropy token in a normal file", () => {
+      const f = scan(`const t = "aB3xY7zQ9wE2rT5uI8oP1kJ4nM6";`, "src/app.ts");
+      expect(f.length).toBeGreaterThan(0);
+      expect(f[0].ruleId).toBe("high-entropy");
+    });
+  });
+
+  describe("keyword — value must be a credential literal, not a field echo", () => {
+    it("does not flag a *_key field whose value is a bare word/identifier", () => {
+      expect(scan(`const body = JSON.stringify({ anthropic_api_key: "key" });`)).toHaveLength(0);
+      expect(scan(`const h = { api_key: "apiKey" };`)).toHaveLength(0);
+      expect(scan(`password: "password"`)).toHaveLength(0);
+    });
+
+    it("does not flag a *_key assigned a URL or path", () => {
+      expect(scan(`const api_key = "https://api.example.com/v1";`)).toHaveLength(0);
+      expect(scan(`secret = "/etc/ssl/private"`)).toHaveLength(0);
+    });
+
+    it("STILL flags a real hardcoded secret value", () => {
+      const f = scan(`const api_key = "aB3xY7zQ9wE2rT5uI8oP1";`);
+      expect(f.length).toBeGreaterThan(0);
+      expect(f[0].ruleId).toBe("keyword-secret");
+    });
+  });
+});

@@ -119,6 +119,25 @@ function shouldSkipFile(path, contentLength) {
         return true;
     return false;
 }
+// Generated / asset files are full of long high-entropy, non-secret tokens
+// (SVG path & style data, minified bundles, source maps, lockfile hashes). The
+// entropy layer is meaningless there, so skip it for these — the keyword and
+// provider layers still run (a real key pasted into any file is still caught).
+const ENTROPY_SKIP_FILE = /\.(svg|map)$|\.min\.(js|css)$|(^|\/)(package-lock\.json|yarn\.lock|pnpm-lock\.ya?ml)$/i;
+function skipEntropyForFile(path) {
+    return ENTROPY_SKIP_FILE.test(path);
+}
+// A keyword value that is a bare alphabetic word (no digits/symbols), a URL, a
+// path, or a version is a field echo / identifier / placeholder — not a literal
+// credential. Real secrets carry entropy from digits/symbols or are long.
+function isNonSecretKeywordValue(value) {
+    const v = value.trim();
+    return ((v.length < 20 && /^[A-Za-z]+$/.test(v)) || // key, apiKey, token, password
+        /^https?:\/\//.test(v) || // a URL assigned to a *_key-ish field
+        /^\/[\w-]/.test(v) || // absolute path
+        /^\d+(\.\d+)*$/.test(v) // version / number
+    );
+}
 // ─── Layer 3: Shannon Entropy ────────────────────────────────────
 export function shannonEntropy(str) {
     if (str.length === 0)
@@ -153,6 +172,10 @@ function isNonSecretValue(value) {
         // structured strings like RDF "@prefix rdf: <http://…> ." that score high on
         // entropy. Keyword-based secrets with spaces are still caught by Layer 2.
         /\s/.test(value) ||
+        // Contains CSS/markup/code structural punctuation — SVG path data ("M10,20L…"),
+        // inline styles ("fill:#fff;stroke:…"), minified JS/CSS. Real credential tokens
+        // are drawn from [A-Za-z0-9_\-+/=.:~] and never contain ; { } < > ( ) or commas.
+        /[;{}<>(),]/.test(value) ||
         // Contains a URL/URI scheme anywhere (namespaces, endpoints). Any *credentialed*
         // URL is still flagged separately by the connection-string layer.
         /\w+:\/\//.test(value));
@@ -265,11 +288,16 @@ export function scanSecrets(context, _partial) {
         }
         // Layer 2: Keyword + assignment (quoted or unquoted for config files)
         if (!flaggedLines.has(i)) {
-            const kwMatch = KEYWORD_PATTERN.exec(line) ?? (configFile ? KEYWORD_UNQUOTED_PATTERN.exec(line) : null);
+            const quotedMatch = KEYWORD_PATTERN.exec(line);
+            const kwMatch = quotedMatch ?? (configFile ? KEYWORD_UNQUOTED_PATTERN.exec(line) : null);
             if (kwMatch) {
                 const keyName = kwMatch[1];
                 const value = kwMatch[2];
-                if (!isPlaceholder(value)) {
+                // The field-echo guard (bare word / URL / path / version) applies only to
+                // quoted values in code. An unquoted value in a config file (YAML/.env/…)
+                // is a real hardcoded secret even when it's a short word.
+                const isFieldEcho = quotedMatch !== null && isNonSecretKeywordValue(value);
+                if (!isPlaceholder(value) && !isFieldEcho) {
                     const lifetime = classifyLifetime("keyword-secret", value);
                     secretFindings.push({
                         id: `keyword-${keyName}-${file.path}-${i + 1}`,
@@ -313,8 +341,11 @@ export function scanSecrets(context, _partial) {
             }
         }
     }
-    // Layer 3: Entropy scan on quoted strings (skip lines already flagged)
-    for (let i = 0; i < lines.length && secretFindings.length < MAX_FINDINGS_PER_FILE; i++) {
+    // Layer 3: Entropy scan on quoted strings (skip lines already flagged).
+    // Skipped wholesale for generated/asset files, which are entropy noise.
+    for (let i = 0; i < lines.length &&
+        secretFindings.length < MAX_FINDINGS_PER_FILE &&
+        !skipEntropyForFile(file.path); i++) {
         if (flaggedLines.has(i))
             continue;
         if (shouldSkipLine(lines[i], commentPattern))
