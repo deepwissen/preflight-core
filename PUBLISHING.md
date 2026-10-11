@@ -53,6 +53,36 @@ Verify end-to-end:
 npx @deepwissen/vet --version  # -> 0.1.0
 ```
 
+## Hands-off releases — npm Trusted Publishing (OIDC)
+
+After the first manual publish above has created each package, switch to
+tokenless, automated releases via `.github/workflows/publish.yml` (OIDC). There
+is **no `NPM_TOKEN` stored anywhere** — GitHub authenticates to npm per-run with
+a short-lived OIDC credential, and npm attaches build provenance automatically.
+
+**One-time setup on npmjs.com (per package):**
+
+1. Open the package → **Settings** → **Trusted Publisher**.
+2. Add a GitHub Actions publisher:
+   - Organization / repository: `deepwissen/preflight-core` (and `deepwissen/vet`)
+   - Workflow filename: `publish.yml`
+   - Environment: leave blank (or set one if you add a protected GH environment).
+
+**Each release after that — no token, no manual publish:**
+
+```bash
+npm version patch        # or minor | major — bumps package.json and commits a tag
+git push --follow-tags   # pushes the commit AND the vX.Y.Z tag
+```
+
+Pushing the `vX.Y.Z` tag triggers `publish.yml`, which lint/typecheck/tests/
+builds, verifies the tag matches `package.json`, and runs `npm publish` over
+OIDC. Watch it under the repo's **Actions** tab.
+
+> Trusted Publishing needs the package to already exist, so the **first** release
+> of each package is the manual `npm publish` above. Every release afterward is
+> the tag-push flow.
+
 ## Notes
 
 - **Versioning:** bump with `npm version patch|minor|major` before each future
