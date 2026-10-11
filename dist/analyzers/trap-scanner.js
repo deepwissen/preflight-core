@@ -13,7 +13,7 @@
 const MAX_TRAP_FINDINGS = 10;
 const MAX_FILE_CHARS = 100_000;
 const NOT_AUTO_PROCESS = "Safe to read, but NOT safe to auto-process — review before any automated tool/agent ingests it";
-const UNSAFE_DESERIALIZE = "Deserializing untrusted data can execute arbitrary code — use a safe loader (e.g. yaml.safe_load, torch.load(weights_only=True))";
+const UNSAFE_DESERIALIZE = "Deserializing untrusted data can execute arbitrary code — use a safe loader (e.g. yaml.safe_load, torch.load(weights_only=True))"; // vet:allow trap-unsafe-deserialization -- the detector's own suggestion text, not a call
 function baseName(path) {
     return path.split("/").pop() ?? path;
 }
