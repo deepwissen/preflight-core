@@ -11,12 +11,16 @@ Both are **scoped and public**; `publishConfig.access = public` is set so a plai
 
 ## One-time prerequisites
 
+Publish as the **`deepwissen`** npm account — the `@deepwissen` scope maps to it
+(a scope can be an npm user or an org).
+
 ```bash
-npm login                      # authenticate
-npm whoami                     # confirm you're logged in
-# Ensure the "deepwissen" org exists on npmjs.com and your user is a member
-# (create it at https://www.npmjs.com/org/create if needed).
+npm login                      # authenticate as `deepwissen`
+npm whoami                     # -> deepwissen
 ```
+
+(If `@deepwissen` is an npm *org* rather than a user account, just ensure the
+account you log in with is a member with publish rights.)
 
 ## Step 1 — publish preflight-core
 
