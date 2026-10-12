@@ -1,6 +1,6 @@
 {
   "name": "@deepwissen/preflight-core",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "Shared detection engine for AI Preflight — secret, trap-file, instruction-integrity, and MCP-config scanners. Pure TypeScript, zero platform dependencies.",
   "license": "MIT",
   "type": "module",

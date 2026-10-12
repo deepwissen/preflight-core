@@ -114,7 +114,7 @@ export interface WasteAnnotation {
 export interface InstructionFileIssue {
     id: string;
     filePath: string;
-    issue: "empty" | "too-short" | "too-long" | "missing" | "hidden-unicode" | "bidi-override" | "suspicious-instruction" | "mcp-embedded-secret" | "mcp-suspicious-tool" | "mcp-unknown-server" | "mcp-risky-config" | "mcp-unpinned-server";
+    issue: "empty" | "too-short" | "too-long" | "missing" | "hidden-unicode" | "bidi-override" | "suspicious-instruction" | "mcp-embedded-secret" | "mcp-suspicious-tool" | "mcp-unknown-server" | "mcp-risky-config" | "mcp-unpinned-server" | "mcp-always-allow" | "agent-skip-permissions" | "agent-broad-command-allow" | "agent-auto-approve-exec" | "agent-auto-approve-write" | "agent-auto-run-hook" | "agent-enable-all-mcp";
     severity?: "info" | "warning" | "error";
     lineCount?: number;
     lineNumber?: number;
