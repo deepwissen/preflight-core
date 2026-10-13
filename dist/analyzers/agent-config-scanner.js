@@ -9,8 +9,9 @@
 const MAX_FILE_CHARS = 100_000;
 const TEST_FILE = /\.(test|spec)\.(ts|tsx|js|jsx)$|__tests__\//;
 // Files that carry agent-autonomy config (scope for the generic key rules, so we
-// never flag the same word appearing in ordinary source).
-const AGENT_CONFIG_PATH = /(^|\/)\.claude\/settings(\.local)?\.json$|(^|\/)\.?mcp\.json$|(^|\/)claude_desktop_config\.json$|(^|\/)\.vscode\/(settings|mcp)\.json$|(^|\/)\.cursor\/mcp\.json$|(^|\/)\.aider\.conf\.ya?ml$|(^|\/)\.continue\/config\.(json|ya?ml)$/i;
+// never flag the same word in ordinary source). MCP config files are deliberately
+// excluded — their auto-approve grants are owned by the MCP scanner.
+const AGENT_CONFIG_PATH = /(^|\/)\.claude\/settings(\.local)?\.json$|(^|\/)\.vscode\/settings\.json$|(^|\/)\.aider\.conf\.ya?ml$|(^|\/)\.continue\/config\.(json|ya?ml)$|(^|\/)\.codex\/config\.(toml|json|ya?ml)$/i;
 // Executable contexts where a wired-in bypass flag is a real foot-gun.
 const EXEC_CONTEXT_PATH = /(^|\/)package\.json$|(^|\/)Makefile$|\.(sh|bash|zsh)$|(^|\/)\.github\/workflows\/[^/]+\.ya?ml$|(^|\/)\.husky\//i;
 const CLAUDE_SETTINGS = /(^|\/)\.claude\/settings(\.local)?\.json$/i;
@@ -40,6 +41,22 @@ const FLAG_RULES = [
         severity: "error",
         description: "Default permission mode is set to bypass approval",
         suggestion: "Set defaultMode to 'ask' (or remove it) so the agent prompts before acting",
+    },
+    {
+        // Aider: auto-confirm every prompt
+        re: /["']?\byes-always\b["']?\s*[:=]\s*true\b/i,
+        issue: "agent-skip-permissions",
+        severity: "error",
+        description: "Aider auto-confirms every prompt (yes-always)",
+        suggestion: "Set yes-always: false so Aider asks before edits and commands",
+    },
+    {
+        // Codex: full-auto approval
+        re: /["']?\bapproval[_-]?mode\b["']?\s*[:=]\s*["']?full-auto["']?/i,
+        issue: "agent-skip-permissions",
+        severity: "error",
+        description: "Approval mode is set to full-auto (no prompts)",
+        suggestion: "Use an interactive/suggest approval mode instead of full-auto",
     },
     {
         re: /["']?\b(?:autoApprove|autoApprovalEnabled|alwaysAllowExecute)\b["']?\s*[:=]\s*true\b/i,
@@ -97,9 +114,9 @@ export function scanAgentConfig(context, _partial) {
     const isExecContext = EXEC_CONTEXT_PATH.test(path);
     // 1. CLI bypass flag wired into an executable context (script/CI/hook) or config.
     if (isExecContext || isAgentConfig) {
-        const m = /--dangerously-skip-permissions\b/.exec(content);
+        const m = /--(?:dangerously-skip-permissions|full-auto)\b/.exec(content);
         if (m) {
-            push("agent-skip-permissions", "error", m.index, "Agent invoked with --dangerously-skip-permissions (no approval prompts)", "Drop --dangerously-skip-permissions; let the agent prompt before running tools");
+            push("agent-skip-permissions", "error", m.index, `Agent invoked with ${m[0]} (no approval prompts)`, "Drop the auto-approve/skip-permissions flag; let the agent prompt before running tools");
         }
     }
     // 2. Generic autonomy flags — scoped to agent config files to avoid flagging

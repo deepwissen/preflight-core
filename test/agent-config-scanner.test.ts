@@ -80,6 +80,16 @@ describe("agent-config-scanner — true positives", () => {
     );
   });
 
+  it("flags Aider yes-always and Codex full-auto (approval mode + CLI)", () => {
+    expect(ids(".aider.conf.yml", `yes-always: true\n`)).toContain("agent-skip-permissions");
+    expect(ids(".codex/config.toml", `approval_mode = "full-auto"\n`)).toContain(
+      "agent-skip-permissions"
+    );
+    expect(ids("package.json", `{ "scripts": { "ai": "codex --full-auto" } }`)).toContain(
+      "agent-skip-permissions"
+    );
+  });
+
   it("flags yolo mode and generic autoApprove", () => {
     expect(ids(".continue/config.json", `{"yolo": true}`)).toContain("agent-skip-permissions");
     expect(ids(".continue/config.json", `{"autoApprove": true}`)).toContain(
@@ -110,6 +120,16 @@ describe("agent-config-scanner — false-positive guards", () => {
   it("does NOT flag the keyword in ordinary source files", () => {
     // same words, but not an agent config path -> generic rules don't apply
     expect(ids("src/app.ts", `const autoApprove = true; // business logic`)).toHaveLength(0);
+  });
+
+  it("does NOT run generic flag rules on MCP files (owned by the MCP scanner)", () => {
+    // .mcp.json is not an agent-config path, so no agent-* duplicate of the MCP scanner
+    expect(ids(".mcp.json", `{ "autoApprove": true }`)).toHaveLength(0);
+    expect(ids("claude_desktop_config.json", `{ "autoApprove": true }`)).toHaveLength(0);
+  });
+
+  it("yes-always: false is not flagged", () => {
+    expect(ids(".aider.conf.yml", `yes-always: false\n`)).toHaveLength(0);
   });
 
   it("treats --dangerously-skip-permissions in docs as non-executable (no finding)", () => {

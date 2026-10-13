@@ -1,6 +1,6 @@
 # Design: Agent-Autonomy Scanner (OWASP LLM06 — Excessive Agency)
 
-**Status:** Phase 1 implemented in `preflight-core` (`src/analyzers/agent-config-scanner.ts`, 19 tests). Decisions taken: **(1)** new `"agent"` category, **(2)** scan executable contexts too, **(3)** bypass/auto-exec = `error`. vet surfacing (the `"agent"` category + `scan.ts` call) lands once core republishes. Phase 2 (Cline/Roo/Aider/Codex/Continue depth) pending.
+**Status:** Implemented in `preflight-core` (`src/analyzers/agent-config-scanner.ts`). 0.1.2 Phase 1 (Claude + generic flags); 0.1.3 de-duped MCP (owned by the MCP scanner); 0.1.4 added Aider `yes-always`, Codex `--full-auto`/`approval_mode: full-auto`, and scoped `AGENT_CONFIG_PATH` to non-MCP configs (`.claude/settings*`, `.vscode/settings.json`, `.aider.conf.*`, `.continue/config.*`, `.codex/config.*`). Decisions taken: **(1)** new `"agent"` category, **(2)** scan executable contexts too, **(3)** bypass/auto-exec = `error`. vet surfacing (the `"agent"` category + `scan.ts` call) lands once core republishes. Phase 2 (Cline/Roo/Aider/Codex/Continue depth) pending.
 
 ## Why
 
