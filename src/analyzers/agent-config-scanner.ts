@@ -22,8 +22,8 @@ const EXEC_CONTEXT_PATH =
   /(^|\/)package\.json$|(^|\/)Makefile$|\.(sh|bash|zsh)$|(^|\/)\.github\/workflows\/[^/]+\.ya?ml$|(^|\/)\.husky\//i;
 
 const CLAUDE_SETTINGS = /(^|\/)\.claude\/settings(\.local)?\.json$/i;
-const MCP_CONFIG =
-  /(^|\/)\.?mcp\.json$|(^|\/)claude_desktop_config\.json$|(^|\/)\.vscode\/mcp\.json$|(^|\/)\.cursor\/mcp\.json$/i;
+// MCP `alwaysAllow`/`autoApprove` is owned by the MCP scanner (scanMcpConfigs,
+// rule mcp-risky-config) — not duplicated here.
 
 type IssueId = InstructionFileIssue["issue"];
 type Severity = "error" | "warning";
@@ -180,29 +180,7 @@ export function scanAgentConfig(
     }
   }
 
-  // 4. MCP server alwaysAllow.
-  if (MCP_CONFIG.test(path)) {
-    const aa = /"alwaysAllow"\s*:\s*\[([\s\S]*?)(?:\]|$)/.exec(content);
-    if (aa) {
-      if (/"\*"/.test(aa[1])) {
-        push(
-          "mcp-always-allow",
-          "error",
-          aa.index,
-          "MCP server auto-approves every tool call (alwaysAllow: ['*'])",
-          "Remove '*'; auto-approve only specific, safe tools"
-        );
-      } else if (/"[^"]+"/.test(aa[1])) {
-        push(
-          "mcp-always-allow",
-          "warning",
-          aa.index,
-          "MCP server auto-approves specific tools without prompting",
-          "Confirm each auto-approved tool is safe to run unattended"
-        );
-      }
-    }
-  }
+  // (MCP alwaysAllow/autoApprove is handled by the MCP scanner, not here.)
 
   return { instructionFileIssues: issues };
 }

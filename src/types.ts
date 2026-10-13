@@ -160,7 +160,6 @@ export interface InstructionFileIssue {
     | "mcp-unknown-server"
     | "mcp-risky-config"
     | "mcp-unpinned-server"
-    | "mcp-always-allow"
     | "agent-skip-permissions"
     | "agent-broad-command-allow"
     | "agent-auto-approve-exec"

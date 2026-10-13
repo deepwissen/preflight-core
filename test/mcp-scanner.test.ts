@@ -520,9 +520,11 @@ describe("scanMcpConfigs — config hygiene", () => {
   const srv = (server: Record<string, unknown>) => ({ mcpServers: { foo: server } });
 
   // Over-broad tool grants
-  it("flags a wildcard auto-approve grant", () => {
+  it("flags a wildcard auto-approve grant as an error", () => {
     const r = scan(srv({ command: "node", args: ["s.js"], autoApprove: ["*"] }));
-    expect(r.some((i) => i.issue === "mcp-risky-config" && /auto-approves ALL/.test(i.description))).toBe(true);
+    const grant = r.find((i) => i.issue === "mcp-risky-config" && /auto-approves ALL/.test(i.description));
+    expect(grant).toBeDefined();
+    expect(grant?.severity).toBe("error");
   });
 
   it("flags a blanket `alwaysAllow: true` grant", () => {

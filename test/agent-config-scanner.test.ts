@@ -87,12 +87,8 @@ describe("agent-config-scanner — true positives", () => {
     );
   });
 
-  it("flags MCP alwaysAllow: ['*'] as error, specific tools as warning", () => {
-    const star = scan(".mcp.json", `{"mcpServers":{"x":{"alwaysAllow":["*"]}}}`);
-    expect(star.find((i) => i.issue === "mcp-always-allow")?.severity).toBe("error");
-    const specific = scan(".mcp.json", `{"mcpServers":{"x":{"alwaysAllow":["read_file"]}}}`);
-    expect(specific.find((i) => i.issue === "mcp-always-allow")?.severity).toBe("warning");
-  });
+  // Note: MCP alwaysAllow/autoApprove is owned by the MCP scanner
+  // (scanMcpConfigs, rule mcp-risky-config), not this analyzer.
 
   it("flags enableAllProjectMcpServers as a warning", () => {
     const f = scan(".claude/settings.json", `{"enableAllProjectMcpServers": true}`);
@@ -129,11 +125,6 @@ describe("agent-config-scanner — false-positive guards", () => {
     expect(ids(".claude/settings.json", `{"permissions":{"deny":["Bash(*)"]}}`)).toHaveLength(0);
   });
 
-  it("does NOT flag an MCP config with no alwaysAllow", () => {
-    expect(ids(".mcp.json", `{"mcpServers":{"x":{"command":"npx","args":["-y","@a/b@1.0.0"]}}}`)).not.toContain(
-      "mcp-always-allow"
-    );
-  });
 });
 
 describe("agent-config-scanner — boundaries", () => {

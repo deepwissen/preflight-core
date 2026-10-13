@@ -52,7 +52,7 @@ Format: `ruleId` · severity · trigger · false-positive guard.
 - `agent-skip-permissions` · **error** · `--dangerously-skip-permissions`, `defaultMode: bypassPermissions`, `yolo: true`. *Guard:* executable contexts only — never prose/`.md`.
 - `agent-broad-command-allow` · **error** · allow-list grants unrestricted shell: `Bash(*)`, bare `Bash`, `*`, `allowedCommands: ["*"]`. *Guard:* scoped entries (`Bash(git status)`, `Bash(npm run test:*)`, `Read(*)`, `Edit(src/**)`) are safe → never flag.
 - `agent-auto-approve-exec` · **error** · `alwaysAllowExecute: true`, Codex `full-auto`, Aider `yes-always: true`.
-- `mcp-always-allow` · **error** · MCP `alwaysAllow` containing `*` or an exec/shell tool. *(extends the MCP scanner)*
+- MCP auto-approve-all (`alwaysAllow`/`autoApprove` = `*` or `true`) is **owned by the MCP scanner** (`scanMcpConfigs`, rule `mcp-risky-config`, escalated to **error** in 0.1.3) — not duplicated here, to avoid double-reporting the same line.
 
 ### Warnings — broad but narrower autonomy
 - `agent-auto-approve-write` · **warning** · auto-approve file writes/edits (`alwaysAllowWrite: true`).

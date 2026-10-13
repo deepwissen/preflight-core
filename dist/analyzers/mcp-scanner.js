@@ -224,7 +224,10 @@ function scanMcpToolGrants(filePath, serverName, serverConfig, issues) {
         const blanket = grant === true;
         const wildcard = Array.isArray(grant) && grant.some((g) => g === "*");
         if (blanket || wildcard) {
-            issues.push(makeIssue(filePath, "mcp-risky-config", "warning", serverName, field, `Server "${serverName}" auto-approves ALL tool calls (${field}: ${blanket ? "true" : '"*"'}) — over-broad grant`));
+            issues.push(makeIssue(filePath, "mcp-risky-config", 
+            // Auto-approving ALL tool calls is excessive agency (OWASP LLM06) —
+            // an error-severity grant, not just advisory.
+            "error", serverName, field, `Server "${serverName}" auto-approves ALL tool calls (${field}: ${blanket ? "true" : '"*"'}) — over-broad grant`));
             return; // one grant finding per server is enough
         }
     }

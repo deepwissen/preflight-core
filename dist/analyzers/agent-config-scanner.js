@@ -14,7 +14,6 @@ const AGENT_CONFIG_PATH = /(^|\/)\.claude\/settings(\.local)?\.json$|(^|\/)\.?mc
 // Executable contexts where a wired-in bypass flag is a real foot-gun.
 const EXEC_CONTEXT_PATH = /(^|\/)package\.json$|(^|\/)Makefile$|\.(sh|bash|zsh)$|(^|\/)\.github\/workflows\/[^/]+\.ya?ml$|(^|\/)\.husky\//i;
 const CLAUDE_SETTINGS = /(^|\/)\.claude\/settings(\.local)?\.json$/i;
-const MCP_CONFIG = /(^|\/)\.?mcp\.json$|(^|\/)claude_desktop_config\.json$|(^|\/)\.vscode\/mcp\.json$|(^|\/)\.cursor\/mcp\.json$/i;
 function lineOf(content, index) {
     return content.slice(0, Math.max(0, index)).split("\n").length;
 }
@@ -127,18 +126,7 @@ export function scanAgentConfig(context, _partial) {
             push("agent-auto-run-hook", "warning", hook.index, "A hook auto-runs a shell command on tool events", "Confirm the hook command is trusted; it runs automatically without approval");
         }
     }
-    // 4. MCP server alwaysAllow.
-    if (MCP_CONFIG.test(path)) {
-        const aa = /"alwaysAllow"\s*:\s*\[([\s\S]*?)(?:\]|$)/.exec(content);
-        if (aa) {
-            if (/"\*"/.test(aa[1])) {
-                push("mcp-always-allow", "error", aa.index, "MCP server auto-approves every tool call (alwaysAllow: ['*'])", "Remove '*'; auto-approve only specific, safe tools");
-            }
-            else if (/"[^"]+"/.test(aa[1])) {
-                push("mcp-always-allow", "warning", aa.index, "MCP server auto-approves specific tools without prompting", "Confirm each auto-approved tool is safe to run unattended");
-            }
-        }
-    }
+    // (MCP alwaysAllow/autoApprove is handled by the MCP scanner, not here.)
     return { instructionFileIssues: issues };
 }
 //# sourceMappingURL=agent-config-scanner.js.map

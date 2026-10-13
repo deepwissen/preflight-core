@@ -373,7 +373,9 @@ function scanMcpToolGrants(
         makeIssue(
           filePath,
           "mcp-risky-config",
-          "warning",
+          // Auto-approving ALL tool calls is excessive agency (OWASP LLM06) —
+          // an error-severity grant, not just advisory.
+          "error",
           serverName,
           field,
           `Server "${serverName}" auto-approves ALL tool calls (${field}: ${blanket ? "true" : '"*"'}) — over-broad grant`
