@@ -86,9 +86,17 @@ const CONNECTION_STRING_PATTERNS = [
         // because that skip only fires in the entropy layer, which runs later.
         id: "url-embedded-credentials",
         label: "Credentials in URL",
-        pattern: /\b[a-z][a-z0-9+.-]*:\/\/[^\s:/@]+:[^\s:/@]+@[^\s/]+/i,
+        // Group 1 = the password portion, so we can skip variable interpolations
+        // (e.g. https://x-access-token:${GH_TOKEN}@github.com — the standard GitHub
+        // Actions idiom, where the "password" is injected from a secret, not literal).
+        pattern: /\b[a-z][a-z0-9+.-]*:\/\/[^\s:/@]+:([^\s:/@]+)@[^\s/]+/i,
     },
 ];
+// A credential value that is actually a variable/interpolation, not a literal:
+// ${VAR}, $VAR, {{var}}, %VAR%, <...>. Common in CI/templated configs.
+function isInterpolation(value) {
+    return /^[$%{<]/.test(value) || /\$\{|\{\{/.test(value);
+}
 // ─── Layer 5: Context Filtering ──────────────────────────────────
 const COMMENT_LINE = /^\s*(\/\/|#|\/\*|\*\/?\s|\*\s|<!--|--\s|%\s|;\s)/;
 // In config formats (.npmrc, .ini, .properties, .env, YAML, TOML) a leading "//"
@@ -304,7 +312,12 @@ export function scanSecrets(context, _partial) {
                 // quoted values in code. An unquoted value in a config file (YAML/.env/…)
                 // is a real hardcoded secret even when it's a short word.
                 const isFieldEcho = quotedMatch !== null && isNonSecretKeywordValue(value);
-                if (!isPlaceholder(value) && !isFieldEcho) {
+                // The keyword also appears in prose (`echo "... add as secret:"`) where the
+                // unquoted "value" is just a stray quote/punctuation — not credential-shaped.
+                const stripped = value.replace(/^["'`]+|["'`]+$/g, "").trim();
+                const isProse = quotedMatch === null && (stripped.length < 3 || !/[A-Za-z0-9]/.test(stripped));
+                const isVariable = isInterpolation(value);
+                if (!isPlaceholder(value) && !isFieldEcho && !isProse && !isVariable) {
                     const lifetime = classifyLifetime("keyword-secret", value);
                     secretFindings.push({
                         id: `keyword-${keyName}-${file.path}-${i + 1}`,
@@ -328,6 +341,11 @@ export function scanSecrets(context, _partial) {
             for (const { id, label, pattern } of CONNECTION_STRING_PATTERNS) {
                 const csMatch = pattern.exec(line);
                 if (csMatch) {
+                    // URL creds whose password is a variable (${GH_TOKEN}, {{var}}, …) are
+                    // not a literal secret — skip (standard CI/templated pattern).
+                    if (id === "url-embedded-credentials" && csMatch[1] && isInterpolation(csMatch[1])) {
+                        continue;
+                    }
                     const lifetime = classifyLifetime(id, csMatch[0]);
                     secretFindings.push({
                         id: `${id}-${file.path}-${i + 1}`,

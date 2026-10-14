@@ -861,5 +861,47 @@ describe("scanSecrets — false-positive guards", () => {
         ).secretFindings ?? [];
       expect(f).toHaveLength(0);
     });
+
+    it("does not flag the word 'secret:' inside a help/echo string (prose)", () => {
+      const f =
+        scanSecrets(
+          makeSnapshot({
+            activeFile: fileWithContent(
+              'echo "2. Add as repository secret:"\n',
+              ".github/workflows/feature.yml"
+            ),
+          }),
+          {}
+        ).secretFindings ?? [];
+      expect(f).toHaveLength(0);
+    });
+
+    it("does not flag a URL whose password is a variable (GitHub Actions idiom)", () => {
+      const f =
+        scanSecrets(
+          makeSnapshot({
+            activeFile: fileWithContent(
+              'git clone https://x-access-token:${GH_TOKEN}@github.com/org/repo.git\n',
+              ".github/workflows/feature.yml"
+            ),
+          }),
+          {}
+        ).secretFindings ?? [];
+      expect(f).toHaveLength(0);
+    });
+
+    it("STILL flags a URL with a literal embedded password", () => {
+      const f =
+        scanSecrets(
+          makeSnapshot({
+            activeFile: fileWithContent(
+              'const u = "https://admin:hunter2pass@db.example.com/x";',
+              "src/db.ts"
+            ),
+          }),
+          {}
+        ).secretFindings ?? [];
+      expect(f.some((x) => x.ruleId === "url-embedded-credentials")).toBe(true);
+    });
   });
 });
