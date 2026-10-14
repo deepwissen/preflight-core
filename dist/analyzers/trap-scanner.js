@@ -28,6 +28,11 @@ const SOURCE_LANGS = new Set([
 function isSourceCode(path, languageId) {
     return /\.(py|ipynb|js|jsx|ts|tsx|mjs|cjs)$/i.test(path) || SOURCE_LANGS.has(languageId);
 }
+// `yaml.load` is unsafe only in Python (PyYAML). In JS/TS, js-yaml v4's `load`
+// is safe by default, so the PyYAML rule must not fire there.
+function isPython(path, languageId) {
+    return /\.(py|ipynb)$/i.test(path) || languageId === "python";
+}
 function isDataFile(path, languageId) {
     return /\.(json|ya?ml)$/i.test(path) || languageId === "json" || languageId === "yaml";
 }
@@ -66,14 +71,14 @@ export function detectTraps(context, _partial) {
         wastePatterns.push({ ruleId, source: file.path, description, severity: "warning", suggestion });
     };
     if (isSourceCode(file.path, file.languageId)) {
-        scanDeserialization(name, lines, addOnce);
+        scanDeserialization(name, lines, addOnce, isPython(file.path, file.languageId));
     }
     if (isDataFile(file.path, file.languageId)) {
         scanDataTraps(file.path, name, file.languageId, lines, addOnce);
     }
     return { wastePatterns };
 }
-function scanDeserialization(name, lines, add) {
+function scanDeserialization(name, lines, add, python) {
     for (let i = 0; i < lines.length; i++) {
         const line = lines[i];
         for (const { label, re } of DESERIALIZE_PATTERNS) {
@@ -82,7 +87,9 @@ function scanDeserialization(name, lines, add) {
                 break;
             }
         }
-        if (YAML_UNSAFE.test(line) || (YAML_LOAD.test(line) && !SAFE_LOADER.test(line))) {
+        // yaml.load is only PyYAML-unsafe; js-yaml v4 `load` is safe, so skip non-Python.
+        // yaml.unsafe_load is PyYAML-specific and always unsafe.
+        if (YAML_UNSAFE.test(line) || (python && YAML_LOAD.test(line) && !SAFE_LOADER.test(line))) {
             add("trap-unsafe-deserialization", `unsafe yaml.load in ${name} line ${i + 1} — can construct arbitrary Python objects`, UNSAFE_DESERIALIZE);
         }
     }

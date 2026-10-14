@@ -70,6 +70,13 @@ const PLACEHOLDER_PATTERNS = [
   /^%\w+%$/,
   /^System\.getenv\b/,
   /^\.\.\./,
+  // Templating placeholders: {{var}} / {{${name}}} (mustache/handlebars), ${var}, <%= %>
+  /^\{\{.*\}\}$/,
+  /^<%=?.*%>$/,
+  // Obvious example literals: "oauth2-token-here", "api-key-goes-here", "token_here"
+  /[-_](here|goes[-_]here)$/i,
+  // GitHub Actions permission values (id-token: write / read / none), not secrets
+  /^(read|write)$/i,
 ];
 
 function isPlaceholder(value: string): boolean {

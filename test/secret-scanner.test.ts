@@ -837,4 +837,29 @@ describe("scanSecrets — false-positive guards", () => {
       expect(f[0].ruleId).toBe("keyword-secret");
     });
   });
+
+  // Dogfood regressions: a real codebase produced these 0-real findings.
+  describe("placeholder / non-secret values from real-world dogfooding", () => {
+    it("does not flag {{...}} template placeholders", () => {
+      expect(scan("const token = `{{${name}}}`;")).toHaveLength(0);
+      expect(scan(`const h = { bearerToken: '{{bearerToken}}' };`)).toHaveLength(0);
+      expect(scan(`const p = { password: "{{password}}" };`)).toHaveLength(0);
+    });
+
+    it("does not flag obvious example literals (…-here / …-goes-here)", () => {
+      expect(scan(`const bearerToken = "oauth2-token-here";`)).toHaveLength(0);
+      expect(scan(`const api_key = "api-key-goes-here";`)).toHaveLength(0);
+    });
+
+    it("does not flag GitHub Actions id-token: write permission (YAML)", () => {
+      const f =
+        scanSecrets(
+          makeSnapshot({
+            activeFile: fileWithContent("permissions:\n  id-token: write\n", ".github/workflows/ci.yml"),
+          }),
+          {}
+        ).secretFindings ?? [];
+      expect(f).toHaveLength(0);
+    });
+  });
 });

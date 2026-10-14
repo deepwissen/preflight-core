@@ -62,8 +62,18 @@ describe("detectTraps — unsafe deserialization (source code)", () => {
     );
   });
 
-  it("flags yaml.load without a safe loader", () => {
+  it("flags yaml.load without a safe loader (Python / PyYAML)", () => {
     expect(ruleIds("cfg = yaml.load(open('c.yml'))", "src/c.py")).toContain(
+      "trap-unsafe-deserialization"
+    );
+  });
+
+  // Dogfood regression: js-yaml v4 `load` is safe; the PyYAML rule is Python-only.
+  it("does NOT flag yaml.load in JS/TS (js-yaml v4 load is safe)", () => {
+    expect(ruleIds("const cfg = yaml.load(src);", "src/parser.ts")).not.toContain(
+      "trap-unsafe-deserialization"
+    );
+    expect(ruleIds("const cfg = yaml.load(src);", "src/parser.js")).not.toContain(
       "trap-unsafe-deserialization"
     );
   });
