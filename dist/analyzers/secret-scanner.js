@@ -7,7 +7,9 @@ const PREFER_SHORT_LIVED = "Non-expiring credential in agent reach — move it t
 const PROVIDER_PREFIXES = [
     { id: "aws-access-key", label: "AWS Access Key", pattern: /(?:AKIA|ASIA)[0-9A-Z]{16}/ },
     { id: "github-token", label: "GitHub Token", pattern: /gh[porsut]_[a-zA-Z0-9]{36}/ },
-    { id: "stripe-key", label: "Stripe Key", pattern: /[spr]k_live_[a-zA-Z0-9]{24,}/ },
+    // Only sk_ (secret) and rk_ (restricted) are secrets; pk_ (publishable) is
+    // public by design — Stripe ships it in client-side code — so it is NOT flagged.
+    { id: "stripe-key", label: "Stripe Key", pattern: /[sr]k_live_[a-zA-Z0-9]{24,}/ },
     { id: "google-api-key", label: "Google API Key", pattern: /AIza[0-9A-Za-z\-_]{35}/ },
     { id: "slack-token", label: "Slack Token", pattern: /xox[bpras]-[a-zA-Z0-9-]+/ },
     { id: "openai-key", label: "OpenAI API Key", pattern: /sk-proj-[A-Za-z0-9]{20,}/ },

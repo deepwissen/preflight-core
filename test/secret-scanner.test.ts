@@ -142,6 +142,18 @@ describe("scanSecrets", () => {
     expect(result.secretFindings!.some((f) => f.ruleId === "stripe-key")).toBe(true);
   });
 
+  it("detects a Stripe restricted (rk_) live key", () => {
+    const key = "rk" + "_" + "live" + "_" + "a".repeat(24);
+    const result = scanSecrets(makeSnapshot({ activeFile: fileWithContent(`k = "${key}";`) }), {});
+    expect(result.secretFindings!.some((f) => f.ruleId === "stripe-key")).toBe(true);
+  });
+
+  it("does NOT flag a Stripe publishable (pk_) key — public by design", () => {
+    const key = "pk" + "_" + "live" + "_" + "a".repeat(24);
+    const result = scanSecrets(makeSnapshot({ activeFile: fileWithContent(`k = "${key}";`) }), {});
+    expect(result.secretFindings!.some((f) => f.ruleId === "stripe-key")).toBe(false);
+  });
+
   it("detects Google API key", () => {
     const result = scanSecrets(
       makeSnapshot({
