@@ -155,6 +155,7 @@ export interface InstructionFileIssue {
     | "hidden-unicode"
     | "bidi-override"
     | "suspicious-instruction"
+    | "role-tag-spoofing"
     | "mcp-embedded-secret"
     | "mcp-suspicious-tool"
     | "mcp-unknown-server"

@@ -90,6 +90,19 @@ describe("agent-config-scanner — true positives", () => {
     );
   });
 
+  it("flags the A1 key set (requireApproval:false, Codex never, acceptEdits, snake_case)", () => {
+    expect(ids(".vscode/settings.json", `{ "requireApproval": false }`)).toContain(
+      "agent-skip-permissions"
+    );
+    expect(ids(".codex/config.toml", `approval_mode = "never"\n`)).toContain("agent-skip-permissions");
+    expect(ids(".claude/settings.json", `{ "permissions": { "defaultMode": "acceptEdits" } }`)).toContain(
+      "agent-auto-approve-write"
+    );
+    expect(ids(".continue/config.json", `{ "auto_approve": true }`)).toContain(
+      "agent-auto-approve-exec"
+    );
+  });
+
   it("flags yolo mode and generic autoApprove", () => {
     expect(ids(".continue/config.json", `{"yolo": true}`)).toContain("agent-skip-permissions");
     expect(ids(".continue/config.json", `{"autoApprove": true}`)).toContain(

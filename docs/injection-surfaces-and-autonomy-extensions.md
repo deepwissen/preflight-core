@@ -1,6 +1,6 @@
 # Design: Trusted-content injection surfaces (B-narrow) + autonomy key extensions (A1)
 
-**Status:** scoped, not implemented. Analysis only. Prioritized as the last detection slice before shifting investment to adoption. Open decisions at the end.
+**Status:** IMPLEMENTED in core 0.1.5. B-narrow (role-tag spoofing + integrity scan over MCP configs & prompt-typed active file) and A1 (extra autonomy keys) shipped with tests. Decisions taken: prompt globs = extension-typed only (`.prompt`/`.prompty`/`.chatmode.md`/`.github/prompts/`); role-tags = warning; MCP config = whole-file unicode/bidi/role-tag, no phrase-matching; bidi kept at the engine's existing `warning`. The last detection slice before shifting investment to adoption.
 
 ## Why
 
@@ -52,8 +52,10 @@ new high-confidence detector:
 - **Detectors:**
   - `hidden-unicode` · **warning** · zero-width / invisible chars in a trusted
     surface. *Near-zero FP* — these don't belong in config/prompts.
-  - `bidi-override` · **error** · Unicode bidi control chars (Trojan-Source
-    class). *Near-zero FP.*
+  - `bidi-override` · **warning** · Unicode bidi control chars (Trojan-Source
+    class). *Near-zero FP.* (Matches the engine's existing bidi severity across
+    all surfaces; gate with `--fail-on warning` to block. Not escalated to error
+    here to avoid a surprising cross-surface behavior change.)
   - `role-tag-spoofing` · **warning** · *(new rule)* — LLM role/turn delimiters
     embedded in content that isn't a chat transcript: `<|im_start|>`,
     `<|system|>`, `[INST]`, `<<SYS>>`. *Low FP* when restricted to these

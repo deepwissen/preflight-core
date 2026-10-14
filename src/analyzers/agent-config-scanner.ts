@@ -72,15 +72,31 @@ const FLAG_RULES: Array<{
     suggestion: "Set yes-always: false so Aider asks before edits and commands",
   },
   {
-    // Codex: full-auto approval
-    re: /["']?\bapproval[_-]?mode\b["']?\s*[:=]\s*["']?full-auto["']?/i,
+    // Codex: full-auto / never approval
+    re: /["']?\bapproval[_-]?mode\b["']?\s*[:=]\s*["']?(?:full-auto|never)["']?/i,
     issue: "agent-skip-permissions",
     severity: "error",
-    description: "Approval mode is set to full-auto (no prompts)",
-    suggestion: "Use an interactive/suggest approval mode instead of full-auto",
+    description: "Approval mode disables prompts (full-auto / never)",
+    suggestion: "Use an interactive/suggest approval mode",
   },
   {
-    re: /["']?\b(?:autoApprove|autoApprovalEnabled|alwaysAllowExecute)\b["']?\s*[:=]\s*true\b/i,
+    // approval explicitly turned off
+    re: /["']?\b(?:requireApproval|confirmBeforeRun)\b["']?\s*[:=]\s*false\b/i,
+    issue: "agent-skip-permissions",
+    severity: "error",
+    description: "Approval/confirmation is disabled for agent actions",
+    suggestion: "Re-enable approval so the agent asks before acting",
+  },
+  {
+    // Claude: auto-accept edits mode
+    re: /["']?\bdefaultMode\b["']?\s*[:=]\s*["']?acceptEdits["']?/i,
+    issue: "agent-auto-approve-write",
+    severity: "warning",
+    description: "Default mode auto-accepts file edits without review",
+    suggestion: "Set defaultMode to 'ask' so edits are reviewed before applying",
+  },
+  {
+    re: /["']?\b(?:autoApprove|auto_approve|autoApprovalEnabled|alwaysAllowExecute|always_allow_execute)\b["']?\s*[:=]\s*true\b/i,
     issue: "agent-auto-approve-exec",
     severity: "error",
     description: "Agent auto-approves command execution",

@@ -13,58 +13,86 @@ const SUSPICIOUS_PATTERNS = [
     /^\s*system\s*:/im,
     /\[]\(https?:\/\/[^)]+\)/, // hidden markdown links
 ];
+// LLM role / turn delimiters embedded in content that isn't a chat transcript —
+// a prompt-injection ("role spoofing") attempt. Restricted to LLM-specific tokens
+// (ChatML / Llama) so bare `<system>` or `### System:` in prose is NOT flagged.
+const ROLE_TAGS = /<\|(?:im_start|im_end|system|user|assistant)\|>|\[\/?INST\]|<<\/?SYS>>/i;
+// Prompt/template files an agent ingests as trusted instructions (extension-typed
+// — not bare `prompts/` dirs, which hold mixed non-agent text).
+const PROMPT_FILE = /\.(prompt|prompty)$|\.chatmode\.md$|(^|\/)\.github\/prompts\//i;
 /** Severity by issue category (security-informed). */
 const ISSUE_SEVERITY = {
     "suspicious-instruction": "warning", // unambiguous attack pattern
     "bidi-override": "warning", // high risk, rarely legitimate
     "hidden-unicode": "info", // could be accidental encoding issue
+    "role-tag-spoofing": "warning", // LLM role delimiter in non-transcript content
 };
 /**
- * Scans instruction file content for integrity issues:
- * - Hidden unicode characters
- * - Bidi override characters
- * - Suspicious prompt injection patterns
+ * Scans agent-trusted content for integrity issues (hidden unicode, bidi
+ * overrides, LLM role-tag spoofing, and — for prose surfaces — suspicious
+ * injection phrases) across three surfaces:
+ * - AI instruction files (CLAUDE.md, .cursorrules, …) — all detectors
+ * - MCP config files — near-zero-FP detectors only (no phrase matching on
+ *   structured config); catches invisible/bidi payloads a reviewer can't see
+ * - a prompt/template file when it is the active file (.prompt, .prompty, …)
  *
- * When multiple categories fire on the same line, the findings are
+ * When multiple categories fire on the same line of a file, the findings are
  * elevated to "error" severity (compound attack detection).
  *
  * Runs after detectWaste, before scoreRisk.
  */
 export function scanInstructionIntegrity(context, _partial) {
-    const wastePatterns = [];
     const instructionFileIssues = [];
+    const seen = new Set();
+    // Scan one surface; `phrases` enables the injection-phrase heuristic (prose
+    // surfaces only — not structured MCP config).
+    const scanOne = (path, content, phrases) => {
+        const before = instructionFileIssues.length;
+        scanHiddenUnicode(path, content, instructionFileIssues);
+        scanBidiOverrides(path, content, instructionFileIssues);
+        scanRoleTags(path, content, instructionFileIssues);
+        if (phrases)
+            scanSuspiciousInstructions(path, content, instructionFileIssues);
+        elevateCompound(instructionFileIssues.slice(before));
+    };
     for (const file of context.aiInstructionFiles) {
         if (!file.content)
             continue;
-        const issuesBefore = instructionFileIssues.length;
-        scanHiddenUnicode(file.path, file.content, instructionFileIssues);
-        scanBidiOverrides(file.path, file.content, instructionFileIssues);
-        scanSuspiciousInstructions(file.path, file.content, instructionFileIssues);
-        // Compound attack detection: multiple categories on the same line
-        const fileIssues = instructionFileIssues.slice(issuesBefore);
-        if (fileIssues.length >= 2) {
-            const byLine = new Map();
-            for (const issue of fileIssues) {
-                if (issue.lineNumber == null)
-                    continue;
-                const group = byLine.get(issue.lineNumber) ?? [];
-                group.push(issue);
-                byLine.set(issue.lineNumber, group);
-            }
-            for (const [, group] of byLine) {
-                if (group.length >= 2) {
-                    for (const issue of group) {
-                        issue.severity = "error";
-                        issue.description += " [compound attack — multiple techniques on same line]";
-                    }
-                }
+        scanOne(file.path, file.content, true);
+        seen.add(file.path);
+    }
+    for (const file of context.mcpConfigFiles ?? []) {
+        if (!file.content || seen.has(file.path))
+            continue;
+        scanOne(file.path, file.content, false);
+        seen.add(file.path);
+    }
+    const active = context.activeFile;
+    if (active?.content && PROMPT_FILE.test(active.path) && !seen.has(active.path)) {
+        scanOne(active.path, active.content, true);
+    }
+    return { wastePatterns: [], instructionFileIssues };
+}
+/** Elevate findings to "error" when 2+ categories hit the same line (compound attack). */
+function elevateCompound(fileIssues) {
+    if (fileIssues.length < 2)
+        return;
+    const byLine = new Map();
+    for (const issue of fileIssues) {
+        if (issue.lineNumber == null)
+            continue;
+        const group = byLine.get(issue.lineNumber) ?? [];
+        group.push(issue);
+        byLine.set(issue.lineNumber, group);
+    }
+    for (const [, group] of byLine) {
+        if (group.length >= 2) {
+            for (const issue of group) {
+                issue.severity = "error";
+                issue.description += " [compound attack — multiple techniques on same line]";
             }
         }
     }
-    return {
-        wastePatterns,
-        instructionFileIssues,
-    };
 }
 function scanHiddenUnicode(filePath, content, issues) {
     const lines = content.split("\n");
@@ -109,6 +137,17 @@ function scanBidiOverrides(filePath, content, issues) {
             const codePoint = match[0].codePointAt(0).toString(16).toUpperCase();
             addIssue(filePath, "bidi-override", i + 1, `U+${codePoint}`, `Bidi override character (U+${codePoint}) in ${fileName(filePath)} line ${i + 1}`, "Remove bidi override characters — they can visually hide malicious instructions", issues);
             return; // One finding per category per file
+        }
+    }
+}
+function scanRoleTags(filePath, content, issues) {
+    const lines = content.split("\n");
+    for (let i = 0; i < lines.length; i++) {
+        ROLE_TAGS.lastIndex = 0;
+        const match = ROLE_TAGS.exec(lines[i]);
+        if (match) {
+            addIssue(filePath, "role-tag-spoofing", i + 1, match[0], `LLM role delimiter "${match[0]}" in ${fileName(filePath)} line ${i + 1}`, "Content uses chat role/turn markers — a prompt-injection (role spoofing) attempt; remove them", issues);
+            return; // one finding per category per file
         }
     }
 }
