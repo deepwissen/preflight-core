@@ -884,6 +884,20 @@ describe("scanSecrets — false-positive guards", () => {
       expect(scan(`secret = "my-secret-key"`)).toHaveLength(0);
     });
 
+    it("does not flag C/C++ parser-token assignments (code expressions)", () => {
+      // misclassified source (unmapped ext → plaintext → treated as config)
+      const scanC = (c: string) =>
+        scanSecrets(makeSnapshot({ activeFile: fileWithContent(c, "parser.cpp") }), {})
+          .secretFindings ?? [];
+      expect(scanC("cur_token = yyextra->lookahead_token;\n")).toHaveLength(0);
+      expect(scanC("     SECRET = 641,\n")).toHaveLength(0);
+      expect(scanC("token = new_token;\n")).toHaveLength(0);
+      expect(scanC("auto &token = tokens[i];\n")).toHaveLength(0);
+      expect(scanC("int max_token = -1;\n")).toHaveLength(0);
+      // positive control: a real quoted secret in the same file still flags
+      expect(scanC('const char *api_token = "aB3xY7zQ9wE2rT5uI8";\n').length).toBeGreaterThan(0);
+    });
+
     it("does not flag a boolean/integer config flag on a secret-named field", () => {
       const scanY = (c: string) =>
         scanSecrets(makeSnapshot({ activeFile: fileWithContent(c, "kong.yaml") }), {})

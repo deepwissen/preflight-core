@@ -398,7 +398,20 @@ export function scanSecrets(
         // The keyword is a segment of an AWS ARN (…:secretsmanager:…:secret:plt/…),
         // i.e. a resource identifier, not an assignment — not a secret.
         const inArn = /\barn:[a-z0-9-]*:/i.test(line.slice(0, kwMatch.index));
-        if (!isPlaceholder(value) && !isFieldEcho && !isProse && !isVariable && !inArn) {
+        // The unquoted value is a code expression, not a literal — e.g. a C/C++
+        // parser assignment `cur_token = yyextra->lookahead_token;`, `SECRET = 641,`,
+        // `token = tokens[i];`. Code punctuation (-> :: ; () [] {} <> or a trailing
+        // comma) never appears in a credential. (Unquoted path only; base64 secrets
+        // using / + = are unaffected.)
+        const isCodeExpr = quotedMatch === null && /->|::|[;(){}[\]<>]|,\s*$/.test(value);
+        if (
+          !isPlaceholder(value) &&
+          !isFieldEcho &&
+          !isProse &&
+          !isVariable &&
+          !inArn &&
+          !isCodeExpr
+        ) {
           const lifetime = classifyLifetime("keyword-secret", value);
           secretFindings.push({
             id: `keyword-${keyName}-${file.path}-${i + 1}`,
