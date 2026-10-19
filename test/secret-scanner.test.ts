@@ -865,6 +865,17 @@ describe("scanSecrets — false-positive guards", () => {
       expect(scan(`secret = "my-secret-key"`)).toHaveLength(0);
     });
 
+    it("does not flag a boolean/integer config flag on a secret-named field", () => {
+      const scanY = (c: string) =>
+        scanSecrets(makeSnapshot({ activeFile: fileWithContent(c, "kong.yaml") }), {})
+          .secretFindings ?? [];
+      expect(scanY("kong_revoke_access_token: true\n")).toHaveLength(0);
+      expect(scanY("enable_secret: false\n")).toHaveLength(0);
+      expect(scanY("token_ttl: 3600\n")).toHaveLength(0);
+      // positive control — a real value on the same field still flags
+      expect(scanY('access_token: "aB3xY7zQ9wE2rT5"\n').length).toBeGreaterThan(0);
+    });
+
     it("does not flag an AWS ARN that references a secret (not the secret itself)", () => {
       const yaml = scanSecrets(
         makeSnapshot({

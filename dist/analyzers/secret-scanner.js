@@ -61,6 +61,11 @@ const PLACEHOLDER_PATTERNS = [
     /[-_](here|goes[-_]here)$/i,
     // GitHub Actions permission values (id-token: write / read / none), not secrets
     /^(read|write)$/i,
+    // Boolean / flag values on a secret-named field (revoke_access_token: true) are
+    // config switches, not credentials.
+    /^(true|false|yes|no|on|off|enabled?|disabled?)$/i,
+    // A plain integer (token_ttl: 3600, max_retries: 5) is config, never a secret.
+    /^\d+$/,
 ];
 function isPlaceholder(value) {
     return PLACEHOLDER_PATTERNS.some((p) => p.test(value.trim()));
