@@ -865,6 +865,19 @@ describe("scanSecrets — false-positive guards", () => {
       expect(scan(`secret = "my-secret-key"`)).toHaveLength(0);
     });
 
+    it("does not flag an AWS ARN that references a secret (not the secret itself)", () => {
+      const yaml = scanSecrets(
+        makeSnapshot({
+          activeFile: fileWithContent(
+            '      Resource: "arn:aws:secretsmanager:*:*:secret:plt/emrg/*"\n',
+            "Role.yaml"
+          ),
+        }),
+        {}
+      ).secretFindings ?? [];
+      expect(yaml).toHaveLength(0);
+    });
+
     it("STILL flags a long multi-word value and an entropy-bearing token", () => {
       // 4-segment passphrase exceeds the 3-segment field-echo guard
       expect(scan(`const password = "correct-horse-battery-staple";`).length).toBeGreaterThan(0);

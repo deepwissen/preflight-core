@@ -331,7 +331,10 @@ export function scanSecrets(context, _partial) {
                 const stripped = value.replace(/^["'`]+|["'`]+$/g, "").trim();
                 const isProse = quotedMatch === null && (stripped.length < 3 || !/[A-Za-z0-9]/.test(stripped));
                 const isVariable = isInterpolation(value);
-                if (!isPlaceholder(value) && !isFieldEcho && !isProse && !isVariable) {
+                // The keyword is a segment of an AWS ARN (…:secretsmanager:…:secret:plt/…),
+                // i.e. a resource identifier, not an assignment — not a secret.
+                const inArn = /\barn:[a-z0-9-]*:/i.test(line.slice(0, kwMatch.index));
+                if (!isPlaceholder(value) && !isFieldEcho && !isProse && !isVariable && !inArn) {
                     const lifetime = classifyLifetime("keyword-secret", value);
                     secretFindings.push({
                         id: `keyword-${keyName}-${file.path}-${i + 1}`,
