@@ -101,14 +101,30 @@ describe("detectTraps — unsafe deserialization (source code)", () => {
 });
 
 describe("detectTraps — data-file traps", () => {
-  it("flags a template expression in JSON", () => {
-    expect(ruleIds('{ "value": "{{ 7 * 7 }}" }', "data/config.json")).toContain(
+  it("flags a payload-shaped template expression — arithmetic, dunder, subscript", () => {
+    expect(ruleIds('{ "value": "{{ 7 * 7 }}" }', "data/config.json")).toContain("trap-data-template");
+    expect(ruleIds("x: \"{{ ''.__class__ }}\"", "data/records.yaml")).toContain("trap-data-template");
+    expect(ruleIds("y: \"{{ config['SECRET_KEY'] }}\"", "data/a.yaml")).toContain(
       "trap-data-template"
     );
   });
 
-  it("flags a template expression in a plain YAML data file", () => {
-    expect(ruleIds("name: {{ inject_me }}", "data/records.yaml")).toContain("trap-data-template");
+  // Bare interpolation is NOT a payload — the sharpened rule leaves it alone.
+  it("does NOT flag bare {{ var }} / dotted-path interpolation", () => {
+    expect(ruleIds("name: {{ username }}", "data/records.yaml")).not.toContain("trap-data-template");
+    expect(ruleIds('{ "to": "{{ user.email }}" }', "data/c.json")).not.toContain(
+      "trap-data-template"
+    );
+    expect(ruleIds("greeting: {{ i18n.hello }}", "data/d.yaml")).not.toContain("trap-data-template");
+  });
+
+  it("does NOT flag i18n/helper calls or array index ({{ t('x') }}, {{ items[0] }})", () => {
+    expect(ruleIds("title: \"{{ t('welcome.title') }}\"", "data/i18n.yaml")).not.toContain(
+      "trap-data-template"
+    );
+    expect(ruleIds('{ "first": "{{ items[0] }}" }', "data/e.json")).not.toContain(
+      "trap-data-template"
+    );
   });
 
   it("flags an external/indirect reference (reference://)", () => {
@@ -202,7 +218,7 @@ describe("detectTraps — scope & robustness", () => {
   });
 
   it("findings are warning severity with the not-auto-process framing", () => {
-    const w = scan('{ "v": "{{ x }}" }', "data/c.json");
+    const w = scan('{ "v": "{{ 7*7 }}" }', "data/c.json");
     expect(w[0].severity).toBe("warning");
     expect(w.some((x) => /auto-process/i.test(x.suggestion))).toBe(true);
   });

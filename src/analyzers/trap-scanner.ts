@@ -67,8 +67,12 @@ const SAFE_LOADER = /safe_?loader|SafeLoader|CSafeLoader/i;
 
 // ─── (b) Trap markers in data files ──────────────────────────────
 
-// Template expression NOT preceded by "$" (so GitHub Actions ${{ }} / shell are excluded).
-const TEMPLATE_EXPR = /(?<!\$)\{\{\s*[^}]+\}\}/;
+// A {{…}} whose inner content looks like a template-injection (SSTI) *payload* —
+// a dunder (__), arithmetic (*, %), or a quoted subscript (['key'] / ["key"]).
+// Deliberately NOT bare interpolation ({{ name }}, {{ user.email }}) or i18n/helper
+// calls ({{ t('x') }}), which are common and benign. "$"-preceded (GitHub Actions
+// ${{ }} / shell) is excluded via the lookbehind.
+const TEMPLATE_PAYLOAD = /(?<!\$)\{\{\s*[^}]*(?:__|[*%]|\[\s*['"])[^}]*\}\}/;
 // Indirect/external data references — "the real payload lives elsewhere".
 const EXTERNAL_REF = /\breference:\/\/|\b\w+cache::|::(?:https?|s3|gs|gcs|az):\/\//i;
 // Paths where {{ }} is legitimate templating (Helm, Ansible, GitHub Actions…).
@@ -161,10 +165,10 @@ function scanDataTraps(
       );
     }
 
-    if (templateSuspect && TEMPLATE_EXPR.test(line)) {
+    if (templateSuspect && TEMPLATE_PAYLOAD.test(line)) {
       add(
         "trap-data-template",
-        `${name} line ${i + 1} has a template expression ({{…}}) in a data field — may be evaluated when the file is processed`,
+        `${name} line ${i + 1} has a template expression with logic ({{…}}) in a data field — possible template injection (SSTI) if rendered with untrusted input`,
         NOT_AUTO_PROCESS
       );
     }
