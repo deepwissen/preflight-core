@@ -56,6 +56,12 @@ const TEMPLATE_EXPR = /(?<!\$)\{\{\s*[^}]+\}\}/;
 const EXTERNAL_REF = /\breference:\/\/|\b\w+cache::|::(?:https?|s3|gs|gcs|az):\/\//i;
 // Paths where {{ }} is legitimate templating (Helm, Ansible, GitHub Actions…).
 const TEMPLATE_CONTEXT = /(^|\/)(templates?|charts?|roles|playbooks?|ansible)(\/|$)|\.github\/workflows\/|helm/i;
+// Unsafe YAML constructor tags — they construct objects / run code when the file
+// is deserialized (PyYAML `!!python/object/apply`, Ruby `!ruby/object`, SnakeYAML
+// `!!javax…`). No legitimate use in config data; near-zero false positives.
+// Safe stdlib tags (!!str, !!int, !!map) and CloudFormation intrinsics (!Ref,
+// !Sub, !GetAtt) deliberately do NOT match.
+const UNSAFE_YAML_TAG = /!{1,2}(?:python\/(?:object|name|module)|ruby\/(?:object|hash|struct)|javax?\.[a-z]|perl\/)/i;
 export function detectTraps(context, _partial) {
     const wastePatterns = [];
     const file = context.activeFile;
@@ -106,6 +112,10 @@ function scanDataTraps(path, name, languageId, lines, add) {
         }
         if (templateSuspect && TEMPLATE_EXPR.test(line)) {
             add("trap-data-template", `${name} line ${i + 1} has a template expression ({{…}}) in a data field — may be evaluated when the file is processed`, NOT_AUTO_PROCESS);
+        }
+        // Unsafe YAML constructor tags run code on deserialization (not in JSON).
+        if (!isJson && UNSAFE_YAML_TAG.test(line)) {
+            add("trap-unsafe-yaml-tag", `${name} line ${i + 1} uses an unsafe YAML tag — constructs objects / runs code when the file is deserialized`, UNSAFE_DESERIALIZE);
         }
     }
 }

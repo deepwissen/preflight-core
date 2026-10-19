@@ -140,6 +140,48 @@ describe("detectTraps — data-file traps", () => {
   });
 });
 
+describe("detectTraps — unsafe YAML deserialization tags", () => {
+  it("flags a PyYAML object/apply tag (RCE payload)", () => {
+    expect(
+      ruleIds('payload: !!python/object/apply:os.system ["id"]', "data/config.yaml")
+    ).toContain("trap-unsafe-yaml-tag");
+  });
+
+  it("flags Ruby and SnakeYAML (Java) constructor tags", () => {
+    expect(ruleIds("x: !ruby/object:Gem::Requirement {}", "data/a.yaml")).toContain(
+      "trap-unsafe-yaml-tag"
+    );
+    expect(
+      ruleIds("x: !!javax.script.ScriptEngineManager [!!java.net.URL [http://x]]", "data/b.yaml")
+    ).toContain("trap-unsafe-yaml-tag");
+  });
+
+  it("flags !!python/name and fires even inside a Helm/Ansible dir", () => {
+    // the template-dir allowlist is for {{ }} only — a deserialization tag is never OK
+    expect(ruleIds("fn: !!python/name:os.system", "roles/x/tasks/main.yaml")).toContain(
+      "trap-unsafe-yaml-tag"
+    );
+  });
+
+  // FP guards — safe tags and CloudFormation intrinsics must not fire
+  it("does NOT flag standard safe YAML tags", () => {
+    expect(ruleIds("a: !!str 123\nb: !!int 4\nc: !!map {}", "data/safe.yaml")).not.toContain(
+      "trap-unsafe-yaml-tag"
+    );
+  });
+
+  it("does NOT flag CloudFormation intrinsic tags (!Ref, !Sub, !GetAtt)", () => {
+    const cfn = "Bucket:\n  Name: !Sub '${App}-data'\n  Arn: !GetAtt Bucket.Arn\n  Ref: !Ref App";
+    expect(ruleIds(cfn, "template.yaml")).not.toContain("trap-unsafe-yaml-tag");
+  });
+
+  it("does NOT flag the tag syntax in JSON (no YAML tags there)", () => {
+    expect(ruleIds('{ "note": "!!python/object is just text here" }', "data.json")).not.toContain(
+      "trap-unsafe-yaml-tag"
+    );
+  });
+});
+
 describe("detectTraps — scope & robustness", () => {
   it("ignores files with no content", () => {
     const snap = makeSnapshot("", "src/x.py");
