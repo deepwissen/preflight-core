@@ -850,6 +850,25 @@ describe("scanSecrets — false-positive guards", () => {
       expect(f.length).toBeGreaterThan(0);
       expect(f[0].ruleId).toBe("high-entropy");
     });
+
+    it("does not entropy-flag a variable-rooted path (IDE macro)", () => {
+      // $PROJECT_DIR$/… in a non-skipped file is still recognized as a path
+      expect(scan('afterPath="$PROJECT_DIR$/emrg-webapp/.project"', "notes.txt")).toHaveLength(0);
+      expect(scan('p = "%APPDATA%\\\\app\\\\config"', "notes.txt")).toHaveLength(0);
+    });
+
+    it("skips the entropy layer for IDE/build metadata and markup files", () => {
+      const path = 'x="$PROJECT_DIR$/emrg-webapp/very-long-ish-value-aB3xY7"';
+      expect(scan(path, ".idea/workspace.xml")).toHaveLength(0);
+      expect(scan('<classpathentry path="src/main/aB3xY7zQ9wE2rT5uI8"/>', "x/.classpath")).toHaveLength(0);
+      expect(scan('<div class="aB3xY7zQ9wE2rT5uI8oP1kJ4nM6 flex">', "app.component.html")).toHaveLength(0);
+    });
+
+    it("STILL catches a real provider key inside an entropy-skipped file", () => {
+      // only the entropy heuristic is skipped — provider/keyword layers still run
+      const f = scan('<script>const k = "AKIAIOSFODNN7EXAMPLE1";</script>', "index.html");
+      expect(f.some((x) => x.ruleId === "aws-access-key")).toBe(true);
+    });
   });
 
   describe("keyword — value must be a credential literal, not a field echo", () => {

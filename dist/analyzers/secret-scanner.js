@@ -152,7 +152,7 @@ function shouldSkipFile(path, contentLength) {
 // (SVG path & style data, minified bundles, source maps, lockfile hashes). The
 // entropy layer is meaningless there, so skip it for these — the keyword and
 // provider layers still run (a real key pasted into any file is still caught).
-const ENTROPY_SKIP_FILE = /\.(svg|map)$|\.min\.(js|css)$|(^|\/)(package-lock\.json|yarn\.lock|pnpm-lock\.ya?ml)$/i;
+const ENTROPY_SKIP_FILE = /\.(svg|map|html?|classpath|project|iml)$|\.min\.(js|css)$|(^|\/)(package-lock\.json|yarn\.lock|pnpm-lock\.ya?ml)$|(^|\/)\.idea\/|(^|\/)\.settings\//i;
 function skipEntropyForFile(path) {
     return ENTROPY_SKIP_FILE.test(path);
 }
@@ -193,6 +193,10 @@ function isNonSecretValue(value) {
     return (/^https?:\/\//.test(value) || // URLs
         /^file:\/\//.test(value) || // file URIs
         /^\/[\w-]/.test(value) || // absolute paths
+        // Variable-rooted path: $PROJECT_DIR$/…, $HOME/…, ${VAR}/…, %APPDATA%\… — an
+        // IDE/shell path macro (JetBrains .idea, Eclipse), never a literal secret.
+        // (Does not match bcrypt/argon2 "$2b$…" — no path separator follows the macro.)
+        /^(\$\{?\w+\}?\$?|%\w+%)[\\/]/.test(value) ||
         /^arn:/.test(value) || // AWS ARNs
         /^[\w.-]+\.\w{2,}\//.test(value) || // registry.io/image, domain/path
         /:\w[\w.-]*$/.test(value) || // image:tag patterns (cr.io/img:v1.2)
