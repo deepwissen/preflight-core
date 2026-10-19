@@ -87,16 +87,29 @@ function isPlaceholder(value: string): boolean {
 
 // ─── Layer 4: Connection Strings ─────────────────────────────────
 
-const CONNECTION_STRING_PATTERNS: Array<{ id: string; label: string; pattern: RegExp }> = [
+// A connection string is only a *secret* if it actually embeds credentials —
+// `://user:pass@host` or a `password=`/`pwd=` query param. A bare
+// `jdbc:postgresql://host:5432/db` (Spring's `spring.datasource.url`, etc.) is
+// just a host reference, not a credential.
+const CONN_CREDS = /:\/\/[^\s/@]*:[^\s/@]+@|[?&](password|passwd|pwd)=[^&\s]+/i;
+
+const CONNECTION_STRING_PATTERNS: Array<{
+  id: string;
+  label: string;
+  pattern: RegExp;
+  requiresCreds?: boolean;
+}> = [
   {
     id: "connection-string-uri",
     label: "Connection String",
     pattern: /\b(mongodb|postgres|postgresql|mysql|redis|amqp|mssql)\+?\w*:\/\/[^\s"'`]{5,}/i,
+    requiresCreds: true,
   },
   {
     id: "connection-string-jdbc",
     label: "JDBC Connection String",
     pattern: /\bjdbc:(postgresql|mysql|sqlserver|oracle):\/\/[^\s"'`]{5,}/i,
+    requiresCreds: true,
   },
   {
     id: "connection-string-dotnet",
@@ -181,7 +194,11 @@ function skipEntropyForFile(path: string): boolean {
 function isNonSecretKeywordValue(value: string): boolean {
   const v = value.trim();
   return (
-    (v.length < 20 && /^[A-Za-z]+$/.test(v)) || // key, apiKey, token, password
+    // A short kebab/snake word-chain of letters (no digits/entropy): a field echo
+    // or placeholder, not a credential — "token", "apiKey", "access-token",
+    // "refresh_token", "my-secret-key". Real tokens carry digits/entropy; capped
+    // at 3 segments / 25 chars so multi-word passphrases are still flagged.
+    (v.length < 25 && /^[A-Za-z]+([-_][A-Za-z]+){0,2}$/.test(v)) ||
     /^https?:\/\//.test(v) || // a URL assigned to a *_key-ish field
     /^\/[\w-]/.test(v) || // absolute path
     /^\d+(\.\d+)*$/.test(v) // version / number
@@ -391,9 +408,14 @@ export function scanSecrets(
 
     // Layer 4: Connection strings
     if (!flaggedLines.has(i)) {
-      for (const { id, label, pattern } of CONNECTION_STRING_PATTERNS) {
+      for (const { id, label, pattern, requiresCreds } of CONNECTION_STRING_PATTERNS) {
         const csMatch = pattern.exec(line);
         if (csMatch) {
+          // A connection URI without embedded credentials is just a host
+          // reference (e.g. Spring's spring.datasource.url), not a secret.
+          if (requiresCreds && !CONN_CREDS.test(csMatch[0])) {
+            continue;
+          }
           // URL creds whose password is a variable (${GH_TOKEN}, {{var}}, …) are
           // not a literal secret — skip (standard CI/templated pattern).
           if (id === "url-embedded-credentials" && csMatch[1] && isInterpolation(csMatch[1])) {

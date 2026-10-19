@@ -560,6 +560,27 @@ describe("scanSecrets", () => {
     expect(result.secretFindings!.some((f) => f.layer === 4)).toBe(true);
   });
 
+  it("does NOT flag a connection URL with no embedded credentials", () => {
+    // Spring's spring.datasource.url — host:port/db only, password is elsewhere
+    const props = scanSecrets(
+      makeSnapshot({
+        activeFile: fileWithContent(
+          "spring.datasource.url=jdbc:postgresql://plt-db-host:5432/platform\n",
+          "application.properties"
+        ),
+      }),
+      {}
+    ).secretFindings!;
+    expect(props.some((f) => f.ruleId.startsWith("connection-string"))).toBe(false);
+
+    expect(
+      scanSecrets(
+        makeSnapshot({ activeFile: fileWithContent('const u = "mongodb://localhost:27017/app";') }),
+        {}
+      ).secretFindings!.some((f) => f.layer === 4)
+    ).toBe(false);
+  });
+
   it("detects Redis connection string", () => {
     const result = scanSecrets(
       makeSnapshot({
@@ -836,6 +857,19 @@ describe("scanSecrets — false-positive guards", () => {
       expect(scan(`const body = JSON.stringify({ anthropic_api_key: "key" });`)).toHaveLength(0);
       expect(scan(`const h = { api_key: "apiKey" };`)).toHaveLength(0);
       expect(scan(`password: "password"`)).toHaveLength(0);
+    });
+
+    it("does not flag a kebab/snake field-echo value (access-token, refresh_token)", () => {
+      expect(scan(`String ACCESS_TOKEN = "access-token";`)).toHaveLength(0);
+      expect(scan(`const refreshToken = "refresh_token";`)).toHaveLength(0);
+      expect(scan(`secret = "my-secret-key"`)).toHaveLength(0);
+    });
+
+    it("STILL flags a long multi-word value and an entropy-bearing token", () => {
+      // 4-segment passphrase exceeds the 3-segment field-echo guard
+      expect(scan(`const password = "correct-horse-battery-staple";`).length).toBeGreaterThan(0);
+      // digits => real-token shape, not a field echo
+      expect(scan(`String ACCESS_TOKEN = "ght-9f2Ka83Lx";`).length).toBeGreaterThan(0);
     });
 
     it("does not flag a *_key assigned a URL or path", () => {
