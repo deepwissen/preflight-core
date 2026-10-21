@@ -61,8 +61,9 @@ variant: "`.cursorignore` has `**/.env.*` but not a bare `.env`."
 - **Phase 1** (cheap, high-value): completeness audit of AI-ignore files against
   canonical secret shapes. No secret-finding cross-ref needed. Catches the bare
   `.env` gap. Pure function + report.
-- **Phase 2**: cross-reference real secret findings with ignore coverage (needs
-  ignore-file content in the snapshot + the whole-repo view).
+  **→ PROMOTED to a scheduled design: `docs/ignore-coverage-audit.md`.**
+- **Phase 2** (still parked): cross-reference real secret findings with ignore
+  coverage (needs ignore-file content in the snapshot + the whole-repo view).
 
 ---
 
