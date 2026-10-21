@@ -3,22 +3,23 @@ import { auditIgnoreCoverage } from "../src/analyzers/ignore-coverage.js";
 
 const issues = (path: string, content: string) =>
   auditIgnoreCoverage(path, content).map((i) => i.issue);
-const suggestions = (path: string, content: string) =>
-  auditIgnoreCoverage(path, content).map((i) => i.matchedText);
 
 describe("auditIgnoreCoverage — true positives (gaps)", () => {
-  it("flags a bare .env slipping past **/.env.* (the flagship gap)", () => {
+  it("emits ONE consolidated finding naming a bare-.env gap (the flagship)", () => {
     const r = auditIgnoreCoverage(".cursorignore", "**/.env.*\n");
-    const envGap = r.find((i) => i.matchedText === "**/.env");
-    expect(envGap).toBeDefined();
-    expect(envGap?.issue).toBe("ignore-coverage-gap");
-    expect(envGap?.severity).toBe("warning");
-    expect(envGap?.suggestion).toContain("**/.env");
+    expect(r).toHaveLength(1);
+    expect(r[0].issue).toBe("ignore-coverage-gap");
+    expect(r[0].severity).toBe("warning");
+    expect(r[0].description).toMatch(/bare \.env/);
+    expect(r[0].suggestion).toContain("**/.env");
   });
 
-  it("flags the common secret shapes missed by a secret/ only ignore", () => {
-    const sug = suggestions(".claudeignore", "**/secret/**\n**/secrets/**\n");
-    expect(sug).toEqual(expect.arrayContaining(["**/.env", "**/*.pem", "**/*.key", "**/*credential*"]));
+  it("lists the common secret shapes missed by a secret/ only ignore in one finding", () => {
+    const r = auditIgnoreCoverage(".claudeignore", "**/secret/**\n**/secrets/**\n");
+    expect(r).toHaveLength(1);
+    for (const p of ["**/.env", "**/*.pem", "**/*.key", "**/*credential*"]) {
+      expect(r[0].suggestion).toContain(p);
+    }
   });
 });
 

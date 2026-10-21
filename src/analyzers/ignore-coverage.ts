@@ -49,19 +49,23 @@ export function auditIgnoreCoverage(path: string, content: string): InstructionF
   if (ignore.patternCount === 0) return [];
   if (!ignore.patterns.some((p) => SECRET_INTENT.test(p))) return []; // no intent → no audit
 
+  const gaps = PROBES.filter((p) => !ignore.matchPath(p.path));
+  if (gaps.length === 0) return [];
+
+  // One consolidated finding per ignore file listing every gap (less noisy than
+  // one-per-gap on an incomplete file).
   const name = path.split("/").pop() ?? path;
-  const issues: InstructionFileIssue[] = [];
-  for (const probe of PROBES) {
-    if (ignore.matchPath(probe.path)) continue; // covered
-    issues.push({
-      id: `ignore-coverage-gap-${probe.suggest}-${path}`,
+  return [
+    {
+      id: `ignore-coverage-gap-${path}`,
       filePath: path,
       issue: "ignore-coverage-gap",
       severity: "warning",
-      matchedText: probe.suggest,
-      description: `${name} protects secret files but does not cover ${probe.label} — it stays reachable by the AI`,
-      suggestion: `Add \`${probe.suggest}\` to ${name}`,
-    });
-  }
-  return issues;
+      matchedText: gaps.map((g) => g.suggest).join(" "),
+      description: `${name} protects secret files but misses: ${gaps
+        .map((g) => g.label)
+        .join(", ")} — they stay reachable by the AI`,
+      suggestion: `Add to ${name}: ${gaps.map((g) => `\`${g.suggest}\``).join(", ")}`,
+    },
+  ];
 }
