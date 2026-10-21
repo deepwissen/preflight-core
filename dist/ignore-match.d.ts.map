@@ -1,0 +1,1 @@
+{"version":3,"file":"ignore-match.d.ts","sourceRoot":"","sources":["../src/ignore-match.ts"],"names":[],"mappings":"AAAA;;;;;;;;;;GAUG;AACH,MAAM,WAAW,MAAM;IACrB,SAAS,CAAC,OAAO,EAAE,MAAM,GAAG,OAAO,CAAC;IACpC,QAAQ,CAAC,YAAY,EAAE,MAAM,CAAC;IAC9B,kFAAkF;IAClF,QAAQ,CAAC,QAAQ,EAAE,MAAM,EAAE,CAAC;CAC7B;AA8CD,wBAAgB,YAAY,CAAC,KAAK,EAAE,MAAM,EAAE,GAAG,MAAM,CAyBpD"}

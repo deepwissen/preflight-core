@@ -2,6 +2,7 @@
 // Consumed by the AI Preflight VS Code extension and the `vet` CLI.
 export * from "./types.js";
 export * from "./analyzers/index.js";
+export * from "./ignore-match.js";
 export * from "./pipeline.js";
 export * from "./budget.js";
 export * from "./ai-tools.js";
