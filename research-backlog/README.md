@@ -15,6 +15,7 @@ depth — is the current binding constraint.** Most are parked deliberately.
 | Idea | Fit | Status / why parked |
 |---|---|---|
 | [Agent BOM](./agent-bom.md) — inventory the agent's tool/context supply chain | High, in-niche | Reporting feature (not a gate), demand unproven → parked behind adoption |
+| [Ignore false-confidence](./ignore-false-confidence.md) — (A) secret files an incomplete `.cursorignore`/`.claudeignore` fails to hide; (B) `.vetignore`/`vet:allow` hiding real-secret paths from the scanner | High, in-niche, novel | Two meta-vuln detectors from a real user scenario; A needs ignore-file content in the snapshot + a core glob matcher, B is vet-only & cheap |
 | **Agent-scoped Zero-Trust detection** — unrestricted egress / `allowedHosts: ["*"]` / no-auth MCP servers in agent & MCP config | High, in-niche | Strongest *next detection* increment if/when we add detection; extends MCP + agent scanners, low FP |
 | **Agent scanner Phase 2** — deeper tool-specific keys (Cline/Roo, Aider, Codex, Continue) | Medium | Generic flag rules already catch most; tool-specific keys drift between versions → maintenance cost. Add only on demand |
 | **A2: per-tool capability classification** (is an auto-approved tool network/exec/write?) | Low | Needs a maintained tool-capability registry; FP + upkeep cost. Deferred |
