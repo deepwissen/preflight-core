@@ -2,7 +2,7 @@
 
 **Status:** IMPLEMENTED in core 0.1.11 — `auditIgnoreCoverage(path, content)`
 (`src/analyzers/ignore-coverage.ts`) + shared gitignore matcher
-(`src/ignore-match.ts`), 13 tests. vet/extension wiring lands after core 0.1.11
+(`src/ignore-match.ts`), 7 tests. vet/extension wiring lands after core 0.1.11
 publishes (they need the new export). Promoted from research-backlog A-Phase-1.
 
 ## Why
