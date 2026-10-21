@@ -3,7 +3,7 @@ export { detectWaste } from "./waste-detector.js";
 export { scanInstructionIntegrity } from "./integrity-scanner.js";
 export { scanMcpConfigs } from "./mcp-scanner.js";
 export { scanAgentConfig } from "./agent-config-scanner.js";
-export { auditIgnoreCoverage } from "./ignore-coverage.js";
+export { auditSecretExposure, auditIgnoreCoverage, isAiIgnoreFile, type AiIgnoreFile, } from "./ignore-coverage.js";
 export { scanSecrets } from "./secret-scanner.js";
 export { detectTraps } from "./trap-scanner.js";
 export { scoreRisk } from "./risk-scorer.js";

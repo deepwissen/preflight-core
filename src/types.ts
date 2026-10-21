@@ -167,6 +167,7 @@ export interface InstructionFileIssue {
     | "agent-auto-approve-write"
     | "agent-auto-run-hook"
     | "agent-enable-all-mcp"
+    | "secret-ai-reachable"
     | "ignore-coverage-gap";
   severity?: "info" | "warning" | "error";
   lineCount?: number;

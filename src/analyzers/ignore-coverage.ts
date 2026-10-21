@@ -2,27 +2,40 @@ import type { InstructionFileIssue } from "../types.js";
 import { createIgnore } from "../ignore-match.js";
 
 /**
- * AI-ignore coverage audit (rule `ignore-coverage-gap`).
+ * AI-ignore checks. Two detectors, in priority order:
  *
- * Teams use `.cursorignore` / `.claudeignore` to keep secret files away from the
- * AI, but the patterns routinely miss what people think they cover — the classic
- * being a `.env.*` glob, which does NOT match a bare `.env`. This audits an
- * AI-ignore file's own patterns against a probe set of canonical secret paths and
- * reports the gaps, so "it looks protective but isn't" is caught.
+ *   1. `auditSecretExposure` (GROUND TRUTH, primary) — a file where a scanner
+ *      actually found a secret that no AI-ignore pattern covers. Real risk in
+ *      *this* repo, not a proxy.
+ *   2. `auditIgnoreCoverage` (HYGIENE LINT, secondary) — pattern gaps against a
+ *      small canonical set (e.g. a `.env.*` glob that misses a bare `.env`).
  *
- * Self-contained per file: needs only the ignore file's content. See
- * docs/ignore-coverage-audit.md.
+ * CRITICAL framing — read before changing anything here:
+ * An ignore file is a *request*, not a wall. The tool may not honour it, and an
+ * agent's Read/Bash calls bypass indexing exclusions entirely. So neither detector
+ * may ever imply "the AI can't read this." They emit ONLY gaps/exposures, never a
+ * "complete"/"protected" verdict, and every finding carries CAVEAT. A clean run
+ * means "no pattern gaps found" — NOT "your secrets are safe from the AI."
  */
+
+/** The permanent caveat on every finding — the tool must not grant false confidence. */
+const CAVEAT =
+  "This is pattern hygiene, not protection: an AI-ignore file is best-effort and an " +
+  "agent's file reads bypass it — the real fix is to keep secrets OUT of the working " +
+  "tree (env injection / secret manager) and rotate anything already exposed. Verify " +
+  "with a canary: drop a fake secret in an ignored path and ask the agent to read it.";
 
 /** AI-tool ignore files whose job is to keep content away from the model. */
 const AI_IGNORE_FILE = /(^|\/)\.(cursorignore|claudeignore|codeiumignore|aiexclude)$/i;
 
-/** The file is trying to protect secrets if any pattern mentions a secret-ish term. */
+/** A file shows secret-protection *intent* if any pattern mentions a secret-ish term. */
 const SECRET_INTENT =
   /env|secret|credential|token|password|passwd|pem|key|rsa|npmrc|netrc|pfx|keystore|p12/i;
 
-// Canonical secret paths every secret-protecting AI-ignore should cover, with the
-// pattern to suggest when it's missing.
+// Canonical secret shapes for the HYGIENE lint. Necessarily incomplete — real
+// secrets live in infinite forms (terraform.tfvars, .aws/credentials, kubeconfig,
+// .pgpass, serviceAccount.json, application.properties, …). This is why the lint
+// is secondary and never asserts completeness.
 const PROBES: Array<{ path: string; label: string; suggest: string }> = [
   { path: ".env", label: "a bare .env", suggest: "**/.env" },
   { path: "prod.env", label: "*.env files", suggest: "**/*.env" },
@@ -33,27 +46,63 @@ const PROBES: Array<{ path: string; label: string; suggest: string }> = [
   { path: ".npmrc", label: ".npmrc (may hold a token)", suggest: "**/.npmrc" },
 ];
 
-function isAiIgnoreFile(path: string): boolean {
+export function isAiIgnoreFile(path: string): boolean {
   return AI_IGNORE_FILE.test(path);
 }
 
+export interface AiIgnoreFile {
+  path: string;
+  content: string;
+}
+
 /**
- * Audit a single AI-ignore file's content. Returns a finding per uncovered
- * canonical secret path — but only when the file shows secret-protection intent
- * (so a `.cursorignore` that only ignores `node_modules/` is never nagged).
+ * PRIMARY (ground truth): files where a scanner actually found a secret that no
+ * AI-ignore pattern covers. Fires loudest on the careless case — a secret present
+ * with no protective patterns (or no AI-ignore file at all) → everything exposed.
+ * Consolidated into one finding (the remediation is the same for all: get them out).
+ */
+export function auditSecretExposure(
+  secretFilePaths: string[],
+  aiIgnoreFiles: AiIgnoreFile[]
+): InstructionFileIssue[] {
+  const files = [...new Set(secretFilePaths)];
+  if (files.length === 0) return [];
+
+  const matchers = aiIgnoreFiles
+    .filter((f) => isAiIgnoreFile(f.path) && f.content)
+    .map((f) => createIgnore(f.content.split("\n")));
+
+  const exposed = files.filter((f) => !matchers.some((m) => m.matchPath(f)));
+  if (exposed.length === 0) return [];
+
+  const list = exposed.slice(0, 10).join(", ") + (exposed.length > 10 ? ", …" : "");
+  return [
+    {
+      id: `secret-ai-reachable-${exposed.length}`,
+      filePath: exposed[0],
+      issue: "secret-ai-reachable",
+      severity: "warning",
+      description: `${exposed.length} file(s) with a detected secret are not covered by any AI-ignore and are reachable by the AI: ${list}`,
+      suggestion: CAVEAT,
+    },
+  ];
+}
+
+/**
+ * SECONDARY (hygiene lint): canonical-shape coverage gaps in one AI-ignore file.
+ * Only runs when the file shows secret-protection intent (it's lint for files that
+ * are *trying*). Never asserts completeness — the canon is necessarily partial.
  */
 export function auditIgnoreCoverage(path: string, content: string): InstructionFileIssue[] {
   if (!isAiIgnoreFile(path) || !content) return [];
 
   const ignore = createIgnore(content.split("\n"));
   if (ignore.patternCount === 0) return [];
-  if (!ignore.patterns.some((p) => SECRET_INTENT.test(p))) return []; // no intent → no audit
+  if (!ignore.patterns.some((p) => SECRET_INTENT.test(p))) return []; // no intent → no lint
 
   const gaps = PROBES.filter((p) => !ignore.matchPath(p.path));
   if (gaps.length === 0) return [];
 
-  // One consolidated finding per ignore file listing every gap (less noisy than
-  // one-per-gap on an incomplete file).
   const name = path.split("/").pop() ?? path;
   return [
     {
@@ -62,10 +111,10 @@ export function auditIgnoreCoverage(path: string, content: string): InstructionF
       issue: "ignore-coverage-gap",
       severity: "warning",
       matchedText: gaps.map((g) => g.suggest).join(" "),
-      description: `${name} protects secret files but misses: ${gaps
+      description: `Pattern hygiene: ${name} covers some secret shapes but not others — missing ${gaps
         .map((g) => g.label)
-        .join(", ")} — they stay reachable by the AI`,
-      suggestion: `Add to ${name}: ${gaps.map((g) => `\`${g.suggest}\``).join(", ")}`,
+        .join(", ")} (a common example: a \`.env.*\` glob does not match a bare \`.env\`)`,
+      suggestion: `Add to ${name}: ${gaps.map((g) => `\`${g.suggest}\``).join(", ")}. ${CAVEAT}`,
     },
   ];
 }

@@ -1,58 +1,63 @@
 import { describe, it, expect } from "vitest";
-import { auditIgnoreCoverage } from "../src/analyzers/ignore-coverage.js";
+import { auditSecretExposure, auditIgnoreCoverage } from "../src/analyzers/ignore-coverage.js";
 
-const issues = (path: string, content: string) =>
-  auditIgnoreCoverage(path, content).map((i) => i.issue);
+// The caveat must be present on EVERY finding — the tool must never grant the
+// false confidence that an ignore file protects secrets from the AI.
+const CAVEAT = /best-effort|bypass|keep secrets out|rotate|canary/i;
 
-describe("auditIgnoreCoverage — true positives (gaps)", () => {
-  it("emits ONE consolidated finding naming a bare-.env gap (the flagship)", () => {
+describe("auditSecretExposure — ground truth (primary)", () => {
+  it("flags a real secret file not covered by any AI-ignore", () => {
+    const r = auditSecretExposure([".pgpass", "config/db.yaml"], [
+      { path: ".cursorignore", content: "**/.env.*\n" },
+    ]);
+    expect(r).toHaveLength(1);
+    expect(r[0].issue).toBe("secret-ai-reachable");
+    expect(r[0].description).toMatch(/\.pgpass/);
+    expect(r[0].suggestion).toMatch(CAVEAT); // caveat, not a pattern
+  });
+
+  it("fires loudest on the careless case — secrets present, NO AI-ignore at all", () => {
+    const r = auditSecretExposure(["secrets/prod.env"], []);
+    expect(r).toHaveLength(1);
+    expect(r[0].issue).toBe("secret-ai-reachable");
+  });
+
+  it("does not fire for a secret file that IS covered", () => {
+    const r = auditSecretExposure([".env"], [{ path: ".cursorignore", content: "**/.env\n" }]);
+    expect(r).toHaveLength(0);
+  });
+
+  it("no secrets → no finding (never a positive 'protected' verdict)", () => {
+    expect(auditSecretExposure([], [{ path: ".cursorignore", content: "**/.env\n" }])).toHaveLength(0);
+  });
+});
+
+describe("auditIgnoreCoverage — hygiene lint (secondary), always caveated", () => {
+  it("flags canon gaps but frames it as hygiene and carries the caveat", () => {
     const r = auditIgnoreCoverage(".cursorignore", "**/.env.*\n");
     expect(r).toHaveLength(1);
     expect(r[0].issue).toBe("ignore-coverage-gap");
-    expect(r[0].severity).toBe("warning");
+    expect(r[0].description).toMatch(/pattern hygiene/i); // not "protected"
     expect(r[0].description).toMatch(/bare \.env/);
-    expect(r[0].suggestion).toContain("**/.env");
+    expect(r[0].suggestion).toMatch(/\*\*\/\.env/); // the fix line
+    expect(r[0].suggestion).toMatch(CAVEAT); // AND the caveat
   });
 
-  it("lists the common secret shapes missed by a secret/ only ignore in one finding", () => {
-    const r = auditIgnoreCoverage(".claudeignore", "**/secret/**\n**/secrets/**\n");
-    expect(r).toHaveLength(1);
-    for (const p of ["**/.env", "**/*.pem", "**/*.key", "**/*credential*"]) {
-      expect(r[0].suggestion).toContain(p);
-    }
-  });
-});
-
-describe("auditIgnoreCoverage — false-positive guards", () => {
-  it("is silent for a complete AI-ignore file", () => {
-    const complete =
-      ".env\n**/.env.*\n**/*.env\n**/id_rsa*\n**/*.pem\n**/*.key\n**/*credential*\n**/.npmrc\n";
+  it("is silent on a complete canon and on intent-less files (no positive verdict)", () => {
+    const complete = ".env\n**/*.env\n**/id_rsa*\n**/*.pem\n**/*.key\n**/*credential*\n**/.npmrc\n";
     expect(auditIgnoreCoverage(".cursorignore", complete)).toHaveLength(0);
+    expect(auditIgnoreCoverage(".cursorignore", "node_modules/\ndist/\n")).toHaveLength(0);
   });
 
-  it("does not audit a file with no secret-protection intent", () => {
-    // only build/dep noise -> not trying to protect secrets -> no nagging
-    expect(issues(".cursorignore", "node_modules/\ndist/\n.next/\n")).toHaveLength(0);
+  it("only lints AI-ignore files — never .gitignore/.vetignore/source", () => {
+    expect(auditIgnoreCoverage(".gitignore", "**/.env.*\n")).toHaveLength(0);
+    expect(auditIgnoreCoverage(".vetignore", "**/.env.*\n")).toHaveLength(0);
+    expect(auditIgnoreCoverage("src/app.ts", "**/.env.*\n")).toHaveLength(0);
   });
 
-  it("only audits AI-ignore files — not .gitignore or .vetignore", () => {
-    expect(issues(".gitignore", "**/.env.*\n")).toHaveLength(0);
-    expect(issues(".vetignore", "**/.env.*\n")).toHaveLength(0);
-    expect(issues("src/app.ts", "**/.env.*\n")).toHaveLength(0);
-  });
-
-  it("covers nested AI-ignore paths and respects a covering pattern", () => {
-    // a bare `.env` pattern covers the .env probe -> no .env gap
-    expect(auditIgnoreCoverage("repo/.cursorignore", ".env\n**/*.pem\n").some((i) => i.matchedText === "**/.env")).toBe(
-      false
-    );
-  });
-});
-
-describe("auditIgnoreCoverage — boundaries", () => {
-  it("empty, comments-only, and malformed content do not crash or flag", () => {
+  it("empty/comments-only/malformed content does not crash or flag", () => {
     expect(auditIgnoreCoverage(".cursorignore", "")).toHaveLength(0);
-    expect(auditIgnoreCoverage(".cursorignore", "# just a comment\n")).toHaveLength(0);
-    expect(() => auditIgnoreCoverage(".cursorignore", "**/[unterminated\n**/.env.*\n")).not.toThrow();
+    expect(auditIgnoreCoverage(".cursorignore", "# comment\n")).toHaveLength(0);
+    expect(() => auditIgnoreCoverage(".cursorignore", "**/[bad\n**/.env.*\n")).not.toThrow();
   });
 });

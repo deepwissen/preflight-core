@@ -1,9 +1,38 @@
-# Design: AI-ignore coverage audit (`ignore-coverage-gap`)
+# Design: AI-ignore checks — exposure (ground truth) + coverage hygiene
 
-**Status:** IMPLEMENTED in core 0.1.11 — `auditIgnoreCoverage(path, content)`
-(`src/analyzers/ignore-coverage.ts`) + shared gitignore matcher
-(`src/ignore-match.ts`), 7 tests. vet/extension wiring lands after core 0.1.11
-publishes (they need the new export). Promoted from research-backlog A-Phase-1.
+**Status:** IMPLEMENTED in core 0.1.11 (`src/analyzers/ignore-coverage.ts`,
+`src/ignore-match.ts`). Reworked after a sharp review: the original shipped only
+the *proxy* (pattern completeness), which a clean run turns into false confidence
+— the exact failure the product fights. vet/extension wiring lands after publish.
+
+## Framing (read before touching this)
+An ignore file is a **request, not a wall** — the tool may not honour it, and an
+agent's Read/Bash calls bypass indexing exclusions entirely. So these checks must
+be **structurally incapable of granting confidence**:
+- **Never emit a positive/"complete/protected" verdict.** Only gaps/exposures.
+- **Every finding carries a permanent caveat:** pattern hygiene ≠ protection;
+  ignores are best-effort and agent tools bypass them; keep secrets OUT of the
+  working tree and rotate; verify with a runtime **canary**.
+- A clean run means "no gaps found," **not** "secrets are safe from the AI."
+
+## Two detectors, in priority order
+1. **`auditSecretExposure` (GROUND TRUTH, primary)** — files where a scanner
+   *actually found a secret* that no AI-ignore pattern covers. Real risk in *this*
+   repo. Fires loudest on the careless case (secret present, no protective patterns
+   / no AI-ignore at all → everything exposed). This is the useful check.
+2. **`auditIgnoreCoverage` (HYGIENE LINT, secondary)** — canonical-shape gaps in one
+   AI-ignore file (the `.env.*`-misses-`.env` footgun). Explicitly a lint, never a
+   completeness claim — the canon is necessarily partial (real secrets live in
+   infinite forms: `terraform.tfvars`, `.aws/credentials`, `kubeconfig`, `.pgpass`,
+   `serviceAccount.json`, `application.properties`, …).
+
+> Known limits honestly stated: the shared gitignore matcher is an *approximation*
+> of each tool's real semantics (`.aiexclude` ≈ Gemini, not gitignore) — so verdicts
+> are advisory, never authoritative about what the tool actually does.
+
+---
+
+_Original A-Phase-1 scope below is superseded by the two-detector design above._
 
 ## Why
 
