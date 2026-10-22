@@ -4,9 +4,11 @@ export { scanInstructionIntegrity } from "./integrity-scanner.js";
 export { scanMcpConfigs } from "./mcp-scanner.js";
 export { scanAgentConfig } from "./agent-config-scanner.js";
 export {
-  auditSecretExposure,
+  auditDetectedExposure,
   auditIgnoreCoverage,
   isAiIgnoreFile,
+  IGNORE_CAVEAT,
+  DETECTION_DISCLAIMER,
   type AiIgnoreFile,
 } from "./ignore-coverage.js";
 export { scanSecrets } from "./secret-scanner.js";

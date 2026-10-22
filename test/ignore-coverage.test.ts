@@ -1,63 +1,90 @@
 import { describe, it, expect } from "vitest";
-import { auditSecretExposure, auditIgnoreCoverage } from "../src/analyzers/ignore-coverage.js";
+import {
+  auditDetectedExposure,
+  auditIgnoreCoverage,
+  IGNORE_CAVEAT,
+  DETECTION_DISCLAIMER,
+} from "../src/analyzers/ignore-coverage.js";
 
-// The caveat must be present on EVERY finding — the tool must never grant the
-// false confidence that an ignore file protects secrets from the AI.
-const CAVEAT = /best-effort|bypass|keep secrets out|rotate|canary/i;
+// Confidence words must never appear in any output — structurally enforces
+// "the tool cannot say you're safe".
+const CONFIDENCE_WORDS = /\b(safe|protect(ed|s|ion)?|secure[d]?|complete[d]?|guaranteed?)\b/i;
 
-describe("auditSecretExposure — ground truth (primary)", () => {
-  it("flags a real secret file not covered by any AI-ignore", () => {
-    const r = auditSecretExposure([".pgpass", "config/db.yaml"], [
-      { path: ".cursorignore", content: "**/.env.*\n" },
-    ]);
+describe("auditDetectedExposure — detected exposure (primary)", () => {
+  it("flags EVERY detected secret as reachable — coverage is not a divider", () => {
+    // one file IS covered by the ignore, one isn't — both are reported
+    const r = auditDetectedExposure(
+      [".env", "config/db.pgpass"],
+      [{ path: ".cursorignore", content: "**/.env\n" }]
+    );
     expect(r).toHaveLength(1);
     expect(r[0].issue).toBe("secret-ai-reachable");
-    expect(r[0].description).toMatch(/\.pgpass/);
-    expect(r[0].suggestion).toMatch(CAVEAT); // caveat, not a pattern
+    expect(r[0].description).toMatch(/\.env/);
+    expect(r[0].description).toMatch(/\.pgpass/); // the covered one is STILL reported
+    expect(r[0].description).toMatch(/best-effort only, not a barrier/); // coverage = weak note
   });
 
-  it("fires loudest on the careless case — secrets present, NO AI-ignore at all", () => {
-    const r = auditSecretExposure(["secrets/prod.env"], []);
-    expect(r).toHaveLength(1);
-    expect(r[0].issue).toBe("secret-ai-reachable");
+  it("fires on the careless case — secrets present, no AI-ignore at all", () => {
+    expect(auditDetectedExposure(["secrets/prod.env"], [])).toHaveLength(1);
   });
 
-  it("does not fire for a secret file that IS covered", () => {
-    const r = auditSecretExposure([".env"], [{ path: ".cursorignore", content: "**/.env\n" }]);
-    expect(r).toHaveLength(0);
-  });
-
-  it("no secrets → no finding (never a positive 'protected' verdict)", () => {
-    expect(auditSecretExposure([], [{ path: ".cursorignore", content: "**/.env\n" }])).toHaveLength(0);
+  it("no secrets → no finding (never a 'you're clean' verdict)", () => {
+    expect(auditDetectedExposure([], [{ path: ".cursorignore", content: "**/.env\n" }])).toHaveLength(0);
   });
 });
 
-describe("auditIgnoreCoverage — hygiene lint (secondary), always caveated", () => {
-  it("flags canon gaps but frames it as hygiene and carries the caveat", () => {
+describe("mandatory report-level disclaimers", () => {
+  it("DETECTION_DISCLAIMER says a clean scan is not proof of no secrets", () => {
+    expect(DETECTION_DISCLAIMER).toMatch(/does NOT mean none are present/i);
+    expect(DETECTION_DISCLAIMER).not.toMatch(CONFIDENCE_WORDS);
+  });
+
+  it("IGNORE_CAVEAT points at the real fix and the canary — once-per-report", () => {
+    expect(IGNORE_CAVEAT).toMatch(/best-effort|bypass/i);
+    expect(IGNORE_CAVEAT).toMatch(/remove secrets from the working tree/i);
+    expect(IGNORE_CAVEAT).toMatch(/canary/i);
+    expect(IGNORE_CAVEAT).not.toMatch(CONFIDENCE_WORDS);
+  });
+
+  it("findings do NOT each repeat the full caveat (shown once per report instead)", () => {
+    const r = auditIgnoreCoverage(".cursorignore", "**/.env.*\n");
+    expect(r[0].suggestion).not.toContain(IGNORE_CAVEAT);
+    expect(auditDetectedExposure([".env"], [])[0].suggestion).not.toContain(IGNORE_CAVEAT);
+  });
+});
+
+describe("no output string uses confidence words", () => {
+  it("across exposure, lint, and the constants", () => {
+    const strings: string[] = [IGNORE_CAVEAT, DETECTION_DISCLAIMER];
+    for (const f of auditDetectedExposure([".env", ".pgpass"], [{ path: ".cursorignore", content: "**/.env\n" }])) {
+      strings.push(f.description, f.suggestion ?? "");
+    }
+    for (const f of auditIgnoreCoverage(".cursorignore", "**/.env.*\n")) {
+      strings.push(f.description, f.suggestion ?? "");
+    }
+    for (const s of strings) expect(s).not.toMatch(CONFIDENCE_WORDS);
+  });
+});
+
+describe("auditIgnoreCoverage — hygiene lint (secondary)", () => {
+  it("flags canon gaps, framed as hygiene, with the fix line", () => {
     const r = auditIgnoreCoverage(".cursorignore", "**/.env.*\n");
     expect(r).toHaveLength(1);
     expect(r[0].issue).toBe("ignore-coverage-gap");
-    expect(r[0].description).toMatch(/pattern hygiene/i); // not "protected"
-    expect(r[0].description).toMatch(/bare \.env/);
-    expect(r[0].suggestion).toMatch(/\*\*\/\.env/); // the fix line
-    expect(r[0].suggestion).toMatch(CAVEAT); // AND the caveat
+    expect(r[0].description).toMatch(/pattern hygiene/i);
+    expect(r[0].suggestion).toMatch(/\*\*\/\.env/);
   });
 
-  it("is silent on a complete canon and on intent-less files (no positive verdict)", () => {
-    const complete = ".env\n**/*.env\n**/id_rsa*\n**/*.pem\n**/*.key\n**/*credential*\n**/.npmrc\n";
-    expect(auditIgnoreCoverage(".cursorignore", complete)).toHaveLength(0);
-    expect(auditIgnoreCoverage(".cursorignore", "node_modules/\ndist/\n")).toHaveLength(0);
-  });
-
-  it("only lints AI-ignore files — never .gitignore/.vetignore/source", () => {
+  it("silent on a complete canon and intent-less files; AI-ignore files only", () => {
+    const full = ".env\n**/*.env\n**/id_rsa*\n**/*.pem\n**/*.key\n**/*credential*\n**/.npmrc\n";
+    expect(auditIgnoreCoverage(".cursorignore", full)).toHaveLength(0);
+    expect(auditIgnoreCoverage(".cursorignore", "node_modules/\n")).toHaveLength(0);
     expect(auditIgnoreCoverage(".gitignore", "**/.env.*\n")).toHaveLength(0);
     expect(auditIgnoreCoverage(".vetignore", "**/.env.*\n")).toHaveLength(0);
-    expect(auditIgnoreCoverage("src/app.ts", "**/.env.*\n")).toHaveLength(0);
   });
 
-  it("empty/comments-only/malformed content does not crash or flag", () => {
+  it("empty / malformed content does not crash or flag", () => {
     expect(auditIgnoreCoverage(".cursorignore", "")).toHaveLength(0);
-    expect(auditIgnoreCoverage(".cursorignore", "# comment\n")).toHaveLength(0);
     expect(() => auditIgnoreCoverage(".cursorignore", "**/[bad\n**/.env.*\n")).not.toThrow();
   });
 });

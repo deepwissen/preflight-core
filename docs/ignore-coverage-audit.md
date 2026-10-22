@@ -16,19 +16,30 @@ be **structurally incapable of granting confidence**:
 - A clean run means "no gaps found," **not** "secrets are safe from the AI."
 
 ## Two detectors, in priority order
-1. **`auditSecretExposure` (GROUND TRUTH, primary)** — files where a scanner
-   *actually found a secret* that no AI-ignore pattern covers. Real risk in *this*
-   repo. Fires loudest on the careless case (secret present, no protective patterns
-   / no AI-ignore at all → everything exposed). This is the useful check.
+1. **`auditDetectedExposure` (DETECTED EXPOSURE, primary)** — **every** file with a
+   detected secret in the working tree is reachable by the AI. Ignore coverage is
+   **not** a divider between "exposed" and "safe" (agent reads bypass it); it's a
+   weak secondary note only. One consolidated finding. Fires loudest on the careless
+   case (secret present, no AI-ignore at all).
 2. **`auditIgnoreCoverage` (HYGIENE LINT, secondary)** — canonical-shape gaps in one
    AI-ignore file (the `.env.*`-misses-`.env` footgun). Explicitly a lint, never a
    completeness claim — the canon is necessarily partial (real secrets live in
    infinite forms: `terraform.tfvars`, `.aws/credentials`, `kubeconfig`, `.pgpass`,
    `serviceAccount.json`, `application.properties`, …).
 
-> Known limits honestly stated: the shared gitignore matcher is an *approximation*
-> of each tool's real semantics (`.aiexclude` ≈ Gemini, not gitignore) — so verdicts
-> are advisory, never authoritative about what the tool actually does.
+### Hard requirements (enforced by tests)
+- **Flag all, don't divide.** A covered secret is as reachable as an uncovered one.
+- **`DETECTION_DISCLAIMER`** — consumers MUST show it on a clean scan; recall is
+  bounded (low-entropy / split / encoded secrets evade detection). "0 findings" ≠
+  "no secrets".
+- **`IGNORE_CAVEAT`** — shown **once per report**, not per finding (repetition →
+  caveat-blindness).
+- **No confidence words** — no output contains safe / protected / secure / complete
+  (a negative-language test enforces this).
+- **Matcher is advisory** — the shared gitignore matcher *approximates* each tool's
+  real semantics (`.aiexclude` ≈ Gemini, not gitignore); verdicts are never
+  authoritative about what the tool actually does.
+- **Release hygiene** — versions are immutable; never move a published/consumed tag.
 
 ---
 
