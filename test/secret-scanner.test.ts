@@ -523,6 +523,57 @@ describe("scanSecrets", () => {
     expect(result.secretFindings!.filter((f) => f.layer === 3)).toHaveLength(0);
   });
 
+  // Dogfood: a long relative path scores high entropy and was flagged "Potential
+  // secret". A filesystem path (absolute, relative ./ ../, home ~/, or bare a/b/c)
+  // is word segments, not a credential.
+  it("does NOT flag a relative path with high entropy (../a/b/c)", () => {
+    const result = scanSecrets(
+      makeSnapshot({
+        activeFile: fileWithContent(
+          "build job: '../Mend_And_Fortify/Fortify/fortify-emrg-viewgen-scr-Svcs-Backend-v2'",
+          "pipeline.yml"
+        ),
+      }),
+      {}
+    );
+    expect(result.secretFindings!.filter((f) => f.layer === 3)).toHaveLength(0);
+  });
+
+  it("does NOT flag ./ , ~/ , or bare multi-segment paths", () => {
+    for (const line of [
+      "src: './src/Components/EmergencyViewGen/FortifyScanService/index.module.tsx'",
+      "p: '~/projects/Mend_And_Fortify/Fortify/fortify-emrg-viewgen-scr'",
+      "p: 'Mend_And_Fortify/Fortify/fortify-emrg-viewgen-scr-Svcs-Backend'",
+    ]) {
+      const result = scanSecrets(
+        makeSnapshot({ activeFile: fileWithContent(line, "pipeline.yml") }),
+        {}
+      );
+      expect(result.secretFindings!.filter((f) => f.layer === 3)).toHaveLength(0);
+    }
+  });
+
+  // Positive controls — the path guard must not blind the entropy layer.
+  it("STILL flags a base64-ish secret that has only a single slash", () => {
+    const result = scanSecrets(
+      makeSnapshot({
+        activeFile: fileWithContent("const c = 'aGVsbG8gd29ybGQK2n9Qz/xR4tF5gE1cDmZ';", "app.ts"),
+      }),
+      {}
+    );
+    expect(result.secretFindings!.some((f) => f.layer === 3)).toBe(true);
+  });
+
+  it("STILL flags a provider key embedded in a path-like value (Layer 1)", () => {
+    const result = scanSecrets(
+      makeSnapshot({
+        activeFile: fileWithContent("k: 'config/AKIAIOSFODNN7EXAMPLE1/x'", "pipeline.yml"),
+      }),
+      {}
+    );
+    expect(result.secretFindings!.some((f) => f.ruleId === "aws-access-key")).toBe(true);
+  });
+
   it("does NOT trigger on short string", () => {
     const result = scanSecrets(
       makeSnapshot({

@@ -228,6 +228,15 @@ function isNonSecretValue(value) {
     return (/^https?:\/\//.test(value) || // URLs
         /^file:\/\//.test(value) || // file URIs
         /^\/[\w-]/.test(value) || // absolute paths
+        // Relative / home-anchored paths: ./x, ../a/b, ~/dir. A filesystem path is
+        // word segments, not a contiguous token — but a long one (../Mend_And_Fortify/
+        // Fortify/fortify-emrg-viewgen-scr-Svcs) can score high entropy and be mistaken
+        // for a secret.
+        /^(\.{1,2}|~)[\\/]/.test(value) ||
+        // Bare multi-segment path (a/b/c): 3+ segments that are all plain file/dir
+        // names (word chars, dot, dash, tilde — no base64 +/= noise). A single-slash
+        // value is left to the entropy check (could be a base64 token with one "/").
+        (value.split(/[\\/]/).length >= 3 && value.split(/[\\/]/).every((s) => /^[\w.~-]*$/.test(s))) ||
         // Variable-rooted path: $PROJECT_DIR$/…, $HOME/…, ${VAR}/…, %APPDATA%\… — an
         // IDE/shell path macro (JetBrains .idea, Eclipse), never a literal secret.
         // (Does not match bcrypt/argon2 "$2b$…" — no path separator follows the macro.)
