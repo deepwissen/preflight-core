@@ -399,6 +399,88 @@ describe("scanSecrets", () => {
     expect(result.secretFindings!.filter((f) => f.layer === 2)).toHaveLength(0);
   });
 
+  // ─── Layer 2c: field-echo & URL query-string false positives (dogfood) ──
+
+  // The unquoted value just echoes a credential field name — no secret.
+  it("does NOT flag an unquoted value that echoes the field name (token: access_token)", () => {
+    const result = scanSecrets(
+      makeSnapshot({ activeFile: fileWithContent("token: access_token", "config.yml") }),
+      {}
+    );
+    expect(result.secretFindings!.filter((f) => f.layer === 2)).toHaveLength(0);
+  });
+
+  it("does NOT flag api_key: api_key / clientSecret: clientSecret echoes", () => {
+    const result = scanSecrets(
+      makeSnapshot({
+        activeFile: fileWithContent("api_key: api_key\nclientSecret: clientSecret", "config.yml"),
+      }),
+      {}
+    );
+    expect(result.secretFindings!.filter((f) => f.layer === 2)).toHaveLength(0);
+  });
+
+  // A secret keyword appearing as a URL query parameter is not an assignment; the
+  // placeholder value must not be flagged, but the rest of the query string must
+  // not be swept into the "value" either.
+  it("does NOT flag a placeholder token in a URL query string", () => {
+    const result = scanSecrets(
+      makeSnapshot({
+        activeFile: fileWithContent(
+          "url: https://api.example.com/oauth?token=access_token&client_id=abc",
+          "config.yml"
+        ),
+      }),
+      {}
+    );
+    expect(result.secretFindings!.filter((f) => f.layer === 2)).toHaveLength(0);
+  });
+
+  it("does NOT flag a placeholder access_token in a quoted URL value", () => {
+    const result = scanSecrets(
+      makeSnapshot({
+        activeFile: fileWithContent(
+          'redirect: "https://host/callback?access_token=TOKEN&state=xyz"',
+          "config.yml"
+        ),
+      }),
+      {}
+    );
+    expect(result.secretFindings!.filter((f) => f.layer === 2)).toHaveLength(0);
+  });
+
+  // Positive controls — the fix must not blind the scanner to real secrets.
+  it("STILL flags a bare unquoted non-keyword value (ml_ref_password: vale)", () => {
+    const result = scanSecrets(
+      makeSnapshot({ activeFile: fileWithContent("ml_ref_password: vale", "config.yml") }),
+      {}
+    );
+    expect(result.secretFindings!.some((f) => f.layer === 2)).toBe(true);
+  });
+
+  it("STILL flags a real high-entropy secret in a URL query string", () => {
+    const result = scanSecrets(
+      makeSnapshot({
+        activeFile: fileWithContent(
+          "url: https://h/cb?api_key=Xk9Qm2Lp8Rv4Tn6Wz0Bc7Df&x=y",
+          "config.yml"
+        ),
+      }),
+      {}
+    );
+    expect(result.secretFindings!.some((f) => f.layer === 2)).toBe(true);
+  });
+
+  it("STILL flags a password= credential in a URL query string", () => {
+    const result = scanSecrets(
+      makeSnapshot({
+        activeFile: fileWithContent("u: https://h/cb?password=hunter2xy", "config.yml"),
+      }),
+      {}
+    );
+    expect(result.secretFindings!.some((f) => f.layer === 2 || f.layer === 4)).toBe(true);
+  });
+
   // ─── Layer 3: Shannon Entropy ──────────────────────────────────
 
   it("detects high-entropy string", () => {

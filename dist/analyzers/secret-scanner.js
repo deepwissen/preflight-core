@@ -172,6 +172,41 @@ function isNonSecretKeywordValue(value) {
         /^\d+(\.\d+)*$/.test(v) // version / number
     );
 }
+// Identifier segments that mean the *value* is just echoing a credential field
+// name (`token: access_token`, `api_key: api_key`), not a real secret.
+const SECRET_WORD_SEGMENTS = new Set([
+    "password",
+    "passwd",
+    "pwd",
+    "pass",
+    "secret",
+    "token",
+    "key",
+    "auth",
+    "credential",
+    "cred",
+]);
+// A field echo in an *unquoted* config value: the value is a pure letter
+// identifier (no digits/entropy, ≤3 segments) whose own words name a credential
+// — `access_token`, `refresh_token`, `api_key`, `clientSecret`, `TOKEN`. Unlike
+// a bare non-keyword word (`vale`, which is a real — if weak — unquoted secret),
+// echoing the field name carries no secret. Narrow on purpose so low-entropy
+// real values aren't silently dropped.
+function isKeywordEchoValue(value) {
+    const v = value.trim();
+    if (v.length >= 25 || !/^[A-Za-z]+([-_][A-Za-z]+){0,2}$/.test(v))
+        return false;
+    // Split on separators AND camelCase boundaries: access_token, accessToken,
+    // clientSecret all become ["...","token"/"secret"/"key"].
+    const words = v
+        .replace(/([a-z])([A-Z])/g, "$1 $2")
+        .toLowerCase()
+        .split(/[-_ ]+/);
+    if (words.some((w) => SECRET_WORD_SEGMENTS.has(w)))
+        return true;
+    // Glued all-lowercase compounds with no boundary to split on: apikey, …
+    return /(apikey|accesstoken|refreshtoken|authtoken|secretkey|accesskey|privatekey)/.test(v.toLowerCase());
+}
 // ─── Layer 3: Shannon Entropy ────────────────────────────────────
 export function shannonEntropy(str) {
     if (str.length === 0)
@@ -330,11 +365,23 @@ export function scanSecrets(context, _partial) {
             const kwMatch = quotedMatch ?? (configFile ? KEYWORD_UNQUOTED_PATTERN.exec(line) : null);
             if (kwMatch) {
                 const keyName = kwMatch[1];
-                const value = kwMatch[2];
-                // The field-echo guard (bare word / URL / path / version) applies only to
-                // quoted values in code. An unquoted value in a config file (YAML/.env/…)
-                // is a real hardcoded secret even when it's a short word.
-                const isFieldEcho = quotedMatch !== null && isNonSecretKeywordValue(value);
+                let value = kwMatch[2];
+                // The keyword is a URL *query parameter* (…://host?token=…&client_id=…),
+                // not a config assignment. The unquoted pattern greedily grabs the rest of
+                // the query string ("access_token&client_id=abc") as the value; bound it to
+                // the actual parameter (terminate at & / # / whitespace) and strip a stray
+                // closing quote so the real value is what gets judged below. A real secret
+                // in a query string (?api_key=<entropy>) still fails the echo/placeholder
+                // guards and is flagged; a known provider key is already caught by Layer 1.
+                const inUrl = quotedMatch === null && /:\/\//.test(line.slice(0, kwMatch.index));
+                if (inUrl)
+                    value = value.split(/[&#\s]/)[0].replace(/^["'`]+|["'`]+$/g, "");
+                // The field-echo guard (bare word / URL / path / version) applies to quoted
+                // values in code. Unquoted config values are real secrets even when short
+                // (`ml_ref_password: vale`), EXCEPT when the value just echoes a credential
+                // field name (`token: access_token`) — that carries no secret.
+                const isFieldEcho = (quotedMatch !== null && isNonSecretKeywordValue(value)) ||
+                    (quotedMatch === null && isKeywordEchoValue(value));
                 // The keyword also appears in prose (`echo "... add as secret:"`) where the
                 // unquoted "value" is just a stray quote/punctuation — not credential-shaped.
                 const stripped = value.replace(/^["'`]+|["'`]+$/g, "").trim();
