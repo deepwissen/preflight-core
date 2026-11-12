@@ -37,6 +37,17 @@ const PROVIDER_PREFIXES = [
     // PASETO token: v1–v4 . local|public . payload — a distinctive prefix no other
     // format shares. gitleaks catches 0% of these.
     { id: "paseto", label: "PASETO Token", pattern: /\bv[1-4]\.(local|public)\.[A-Za-z0-9_-]{10,}/ },
+    // PASERK key: k1–k4 . <type> . data (type ∈ local/public/secret/seal/lid/sid/pid
+    // and -wrap/-pw variants). Dedicated rule so it never depends on the entropy layer
+    // (the dotted-identifier noise filter would otherwise skip `k3.secret.…`).
+    // gitleaks catches 0% of these.
+    {
+        id: "paserk",
+        label: "PASERK Key",
+        // k{v}.{type}[-wrap|-pw].[<algo>.]<data> — the -wrap/-pw variants add an
+        // algorithm segment (k4.local-wrap.pie.<data>), so allow one optional segment.
+        pattern: /\bk[1-4]\.(local|public|secret|seal|lid|sid|pid)(-(wrap|pw))?\.(?:[a-z0-9]+\.)?[A-Za-z0-9_-]{16,}/,
+    },
     // NATS NKEY seed: `S` (seed) + role letter (U/A/O/N/C) + base32, 56 more chars.
     { id: "nkey-seed", label: "NATS NKEY Seed", pattern: /\bS[AOUNC][A-Z2-7]{48,}\b/ },
     // ── Ported provider formats (patterns adapted from gitleaks, MIT-licensed). ──

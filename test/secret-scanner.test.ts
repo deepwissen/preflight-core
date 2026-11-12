@@ -605,6 +605,21 @@ describe("scanSecrets", () => {
     it("STILL flags a real high-entropy token (no dots/#/non-ascii)", () => {
       expect(l3('const c = "a8K3mZp9Qw2LxNvB7yH4jR6tF5gE1cD";')).toBeGreaterThan(0);
     });
+
+    // Regression: the dotted-identifier filter skipped PASERK keys (k3.secret.…)
+    // because they look like dotted names. A dedicated Layer 1 rule fixes it so it
+    // no longer depends on the entropy layer at all.
+    it("flags PASERK keys (dedicated rule, not entropy) incl. -wrap/-pw variants", () => {
+      const rules = (c: string) =>
+        (scanSecrets(makeSnapshot({ activeFile: fileWithContent(c) }), {}).secretFindings ?? []).map(
+          (f) => f.ruleId
+        );
+      const d = "aB9xZ_2-".repeat(6);
+      expect(rules(`{"k":"k3.secret.${d}"}`)).toContain("paserk");
+      expect(rules(`{"k":"k4.public.${d}"}`)).toContain("paserk");
+      expect(rules(`{"k":"k2.local-wrap.pie.${d}"}`)).toContain("paserk");
+      expect(rules(`{"k":"k1.secret-pw.${d}"}`)).toContain("paserk");
+    });
   });
 
   // Dogfood: a long relative path scores high entropy and was flagged "Potential
