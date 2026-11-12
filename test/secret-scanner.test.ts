@@ -1419,4 +1419,30 @@ describe("scanSecrets — false-positive guards", () => {
       expect(scanC("Bearer bonds are financial instruments")).toHaveLength(0);
     });
   });
+
+  // ─── Structural keyword false alarms (engine 0.1.22 benchmark) ──
+  describe("structural-value guards", () => {
+    const scanC = (content: string, path = "src/app.go") =>
+      scanSecrets(makeSnapshot({ activeFile: fileWithContent(content, path) }), {}).secretFindings ??
+      [];
+
+    it("skips Go struct tags, format strings, label keys, k8s keys, hex vectors", () => {
+      expect(scanC('Field string `key:"value9,range=[1:5]"`')).toHaveLength(0);
+      expect(scanC('key = "plugin.%s.src.subdir"')).toHaveLength(0);
+      expect(scanC("TopologyKey: \"k8s.io/zone\"", "a.yaml")).toHaveLength(0);
+      expect(scanC('token = "***REDACTED***"')).toHaveLength(0);
+      expect(scanC("password = 'Passwort:'", "a.js")).toHaveLength(0);
+      expect(scanC('Key = "0123456789abcdef0123"')).toHaveLength(0); // sequential hex
+    });
+
+    it("keeps passwords that contain code punctuation (non-password-only guard)", () => {
+      expect(scanC('db_password = "P@ss,w0rd!"').length).toBeGreaterThan(0);
+      expect(scanC('password = "a[b]c9d!Xy"').length).toBeGreaterThan(0);
+    });
+
+    it("keeps real keys / base64 (no code punctuation)", () => {
+      expect(scanC('app_key = "a3f9c2e81b7d4056af12cd34"').length).toBeGreaterThan(0);
+      expect(scanC('secret = "aGVsbG8vd29ybGQK2n9Qz="').length).toBeGreaterThan(0);
+    });
+  });
 });

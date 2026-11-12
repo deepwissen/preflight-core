@@ -305,6 +305,25 @@ function isShortWordValue(value) {
     const v = value.trim().replace(/[;,.:!?]+$/, "");
     return v.length >= 1 && v.length < 12 && /^[A-Za-z][A-Za-z_-]*$/.test(v);
 }
+// Values whose *shape* proves they're code/config structure, not a credential.
+// Safe for ALL fields — passwords don't contain these forms:
+//   - redaction markers:          "***Sensitive Data Redacted***"
+//   - printf format strings:      "plugin.%s.src.subdir"
+//   - UI labels ending in a colon:'Passwort:'
+//   - domain/label keys w/ path:  "k8s.io/zone"
+function isStructuralValue(value) {
+    const v = value.trim();
+    return (/\*{3,}/.test(v) ||
+        /%[-+ #0]*\d*\.?\d*[sdifxXeEgGcvp]/.test(v) ||
+        /^[A-Za-z][A-Za-z ]*:$/.test(v) ||
+        /^[a-z0-9-]+(\.[a-z0-9-]+)+\/[\w.\-/]*$/i.test(v));
+}
+// Code-structure punctuation (brackets/braces/angles, or a comma) — Go struct
+// tags `key:"value9,range=[1:5]"`, arrays, generics. NON-password only: real
+// passwords legitimately contain `,` `[` `]`, but API keys/tokens never do.
+function hasCodePunctuation(value) {
+    return /[,[\]{}<>]/.test(value);
+}
 // A field whose name marks it as a test fixture / mock / expected value
 // (MOCK_ACCESS_TOKEN, expectedPassword, testApiKey) — not a live credential.
 // Splits on separators AND camelCase so the marker is matched as a whole segment
@@ -656,6 +675,12 @@ export function scanSecrets(context, _partial) {
                 // not a secret (`"lockPassword": "パスワード"`, "пароль", "账户密码"). Real
                 // secrets are drawn from printable ASCII.
                 const isNonAscii = /[^ -~]/.test(value);
+                // Code/config structure (format strings, label keys, k8s keys) and
+                // sequential hex test vectors (0123…, FEDC…) — not credentials. The
+                // bracket/comma check is non-password-only (passwords contain `,[]`).
+                const isStructural = isStructuralValue(value) ||
+                    isSequentialRun(value) ||
+                    (!isPwdField && hasCodePunctuation(value));
                 if (!isPlaceholder(value) &&
                     !isFieldEcho &&
                     !isProse &&
@@ -672,7 +697,8 @@ export function scanSecrets(context, _partial) {
                     !tooShort &&
                     !isPrimitiveType &&
                     !isWordValue &&
-                    !isNonAscii) {
+                    !isNonAscii &&
+                    !isStructural) {
                     const lifetime = classifyLifetime("keyword-secret", value);
                     secretFindings.push({
                         id: `keyword-${keyName}-${file.path}-${i + 1}`,
