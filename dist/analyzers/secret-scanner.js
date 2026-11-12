@@ -39,6 +39,99 @@ const PROVIDER_PREFIXES = [
     { id: "paseto", label: "PASETO Token", pattern: /\bv[1-4]\.(local|public)\.[A-Za-z0-9_-]{10,}/ },
     // NATS NKEY seed: `S` (seed) + role letter (U/A/O/N/C) + base32, 56 more chars.
     { id: "nkey-seed", label: "NATS NKEY Seed", pattern: /\bS[AOUNC][A-Z2-7]{48,}\b/ },
+    // ── Ported provider formats (patterns adapted from gitleaks, MIT-licensed). ──
+    // Only vendors whose credentials carry a DISTINCTIVE prefix are included, so these
+    // stay false-positive-free without needing keyword context. (Bare-hex providers
+    // like Datadog/Okta/Heroku are left to the keyword+entropy layers.)
+    {
+        id: "github-fine-grained-pat",
+        label: "GitHub Fine-grained PAT",
+        pattern: /github_pat_[0-9a-zA-Z_]{80,}/,
+    },
+    {
+        id: "openai-key",
+        label: "OpenAI API Key",
+        pattern: /sk-[A-Za-z0-9]{20}T3BlbkFJ[A-Za-z0-9]{20}/,
+    },
+    { id: "anthropic-key", label: "Anthropic API Key", pattern: /sk-ant-[A-Za-z0-9_-]{30,}/ },
+    { id: "huggingface-token", label: "Hugging Face Token", pattern: /hf_[A-Za-z0-9]{34,}/ },
+    { id: "twilio-key", label: "Twilio API Key", pattern: /\bSK[0-9a-f]{32}\b/ },
+    {
+        id: "sendgrid-key",
+        label: "SendGrid API Key",
+        pattern: /SG\.[A-Za-z0-9_-]{22}\.[A-Za-z0-9_-]{43}/,
+    },
+    { id: "shopify-token", label: "Shopify Token", pattern: /shp(at|ca|pa|ss)_[a-fA-F0-9]{32}/ },
+    { id: "mailgun-key", label: "Mailgun API Key", pattern: /\bkey-[0-9a-f]{32}\b/ },
+    { id: "mailchimp-key", label: "Mailchimp API Key", pattern: /\b[0-9a-f]{32}-us[0-9]{1,2}\b/ },
+    { id: "square-token", label: "Square Access Token", pattern: /sq0(atp|csp)-[0-9A-Za-z_-]{22,}/ },
+    { id: "digitalocean-token", label: "DigitalOcean Token", pattern: /do[opr]_v1_[a-f0-9]{64}/ },
+    { id: "pypi-token", label: "PyPI Upload Token", pattern: /pypi-AgEIcHlwaS[A-Za-z0-9_-]{50,}/ },
+    { id: "postman-key", label: "Postman API Key", pattern: /PMAK-[a-fA-F0-9]{24}-[a-fA-F0-9]{34}/ },
+    { id: "linear-key", label: "Linear API Key", pattern: /lin_api_[0-9a-zA-Z]{40}/ },
+    { id: "notion-token", label: "Notion Integration Token", pattern: /ntn_[0-9A-Za-z]{36,}/ },
+    { id: "figma-token", label: "Figma Token", pattern: /figd_[0-9A-Za-z_-]{40,}/ },
+    { id: "databricks-token", label: "Databricks Token", pattern: /\bdapi[0-9a-f]{32,}/ },
+    {
+        id: "discord-webhook",
+        label: "Discord Webhook",
+        pattern: /https:\/\/discord(?:app)?\.com\/api\/webhooks\/[0-9]+\/[A-Za-z0-9_-]+/,
+    },
+    {
+        id: "telegram-bot-token",
+        label: "Telegram Bot Token",
+        pattern: /\b[0-9]{8,10}:AA[A-Za-z0-9_-]{32,}/,
+    },
+    {
+        id: "slack-webhook",
+        label: "Slack Webhook",
+        pattern: /https:\/\/hooks\.slack\.com\/services\/T[A-Za-z0-9]+\/B[A-Za-z0-9]+\/[A-Za-z0-9]+/,
+    },
+    { id: "newrelic-key", label: "New Relic API Key", pattern: /NRAK-[A-Z0-9]{27}/ },
+    {
+        id: "grafana-sa-token",
+        label: "Grafana Service Account Token",
+        pattern: /glsa_[A-Za-z0-9]{32}_[a-fA-F0-9]{8}/,
+    },
+    { id: "grafana-cloud-token", label: "Grafana Cloud Token", pattern: /glc_[A-Za-z0-9+/=_-]{32,}/ },
+    { id: "vault-token", label: "HashiCorp Vault Token", pattern: /\bhv[sb]\.[A-Za-z0-9_-]{24,}/ },
+    { id: "atlassian-token", label: "Atlassian API Token", pattern: /ATATT3[A-Za-z0-9_\-=]{100,}/ },
+    { id: "doppler-token", label: "Doppler Token", pattern: /dp\.pt\.[A-Za-z0-9]{40,}/ },
+    { id: "sentry-token", label: "Sentry Auth Token", pattern: /sntry[su]_[A-Za-z0-9+/=._-]{40,}/ },
+    { id: "supabase-token", label: "Supabase Service Key", pattern: /\bsbp_[a-f0-9]{40}\b/ },
+    {
+        id: "planetscale-token",
+        label: "PlanetScale Token",
+        pattern: /pscale_(tkn|pw)_[A-Za-z0-9_-]{32,}/,
+    },
+    { id: "dropbox-token", label: "Dropbox Token", pattern: /\bsl\.[A-Za-z0-9_-]{130,}/ },
+    { id: "age-secret-key", label: "age Secret Key", pattern: /AGE-SECRET-KEY-1[0-9A-Z]{58}/ },
+    { id: "rubygems-key", label: "RubyGems API Key", pattern: /rubygems_[0-9a-f]{48}/ },
+    { id: "flyio-token", label: "Fly.io Token", pattern: /\bfo1_[A-Za-z0-9_-]{40,}/ },
+    {
+        id: "terraform-cloud-token",
+        label: "Terraform Cloud Token",
+        pattern: /[A-Za-z0-9]{14}\.atlasv1\.[A-Za-z0-9_-]{60,}/,
+    },
+    { id: "clojars-token", label: "Clojars Token", pattern: /CLOJARS_[0-9a-z]{60}/ },
+    {
+        id: "plaid-token",
+        label: "Plaid Access Token",
+        pattern: /access-(sandbox|development|production)-[0-9a-f]{8}-[0-9a-f-]{27}/,
+    },
+    { id: "prefect-key", label: "Prefect API Key", pattern: /pnu_[0-9a-zA-Z]{36}/ },
+    {
+        id: "brevo-key",
+        label: "Brevo (Sendinblue) Key",
+        pattern: /xkeysib-[a-f0-9]{64}-[A-Za-z0-9]{16}/,
+    },
+    { id: "typeform-token", label: "Typeform Token", pattern: /tfp_[A-Za-z0-9_-]{40,}/ },
+    {
+        id: "duffel-token",
+        label: "Duffel API Token",
+        pattern: /duffel_(test|live)_[A-Za-z0-9_-]{40,}/,
+    },
+    { id: "easypost-key", label: "EasyPost API Key", pattern: /\bEZ[AT]K[A-Za-z0-9]{50,}/ },
 ];
 // ─── Layer 2: Keyword + Assignment ───────────────────────────────
 // Quoted values — works in any language. Bare `key` catches app_key/encryption_key/

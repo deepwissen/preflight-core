@@ -90,6 +90,66 @@ describe("scanSecrets", () => {
 
   // ─── Layer 1: Provider Prefixes ────────────────────────────────
 
+  // Data-driven: every ported provider rule must match a valid example (guards
+  // against regex typos) and attribute it to the right ruleId.
+  describe("ported provider formats (Layer 1)", () => {
+    const rules = (c: string) =>
+      (scanSecrets(makeSnapshot({ activeFile: fileWithContent(c) }), {}).secretFindings ?? []).map(
+        (f) => f.ruleId
+      );
+    const A = (n: number) => "A".repeat(n);
+    const h = (n: number) => "0123456789abcdef".repeat(Math.ceil(n / 16)).slice(0, n);
+    const cases: Array<[string, string]> = [
+      ["github-fine-grained-pat", `t="github_pat_${A(82)}"`],
+      ["openai-key", `k="sk-${A(20)}T3BlbkFJ${A(20)}"`],
+      ["anthropic-key", `k="sk-ant-api03-${A(30)}"`],
+      ["huggingface-token", `k="hf_${A(34)}"`],
+      ["twilio-key", `k="SK${h(32)}"`],
+      ["sendgrid-key", `k="SG.${A(22)}.${A(43)}"`],
+      ["shopify-token", `k="shpat_${h(32)}"`],
+      ["mailgun-key", `k="key-${h(32)}"`],
+      ["mailchimp-key", `k="${h(32)}-us1"`],
+      ["square-token", `k="sq0atp-${A(22)}"`],
+      ["digitalocean-token", `k="dop_v1_${h(64)}"`],
+      ["pypi-token", `k="pypi-AgEIcHlwaS${A(50)}"`],
+      ["postman-key", `k="PMAK-${h(24)}-${h(34)}"`],
+      ["linear-key", `k="lin_api_${A(40)}"`],
+      ["notion-token", `k="ntn_${A(36)}"`],
+      ["figma-token", `k="figd_${A(40)}"`],
+      ["databricks-token", `k="dapi${h(32)}"`],
+      ["discord-webhook", "https://discord.com/api/webhooks/123456789/AbCdEf-_1xyz"],
+      ["telegram-bot-token", `k="123456789:AA${A(33)}"`],
+      ["slack-webhook", `https://hooks.slack.com/services/T00000000/B00000000/${A(24)}`],
+      ["newrelic-key", `k="NRAK-${A(27)}"`],
+      ["grafana-sa-token", `k="glsa_${A(32)}_${h(8)}"`],
+      ["grafana-cloud-token", `k="glc_${A(32)}"`],
+      ["vault-token", `k="hvs.${A(24)}"`],
+      ["atlassian-token", `k="ATATT3${A(100)}"`],
+      ["doppler-token", `k="dp.pt.${A(40)}"`],
+      ["sentry-token", `k="sntrys_${A(40)}"`],
+      ["supabase-token", `k="sbp_${h(40)}"`],
+      ["planetscale-token", `k="pscale_tkn_${A(32)}"`],
+      ["dropbox-token", `k="sl.${A(130)}"`],
+      ["age-secret-key", `k="AGE-SECRET-KEY-1${A(58)}"`],
+      ["rubygems-key", `k="rubygems_${h(48)}"`],
+      ["flyio-token", `k="fo1_${A(40)}"`],
+      ["terraform-cloud-token", `k="${A(14)}.atlasv1.${A(60)}"`],
+      ["clojars-token", `k="CLOJARS_${"a".repeat(60)}"`],
+      ["plaid-token", `k="access-sandbox-11111111-2222-3333-4444-555555555555"`],
+      ["prefect-key", `k="pnu_${A(36)}"`],
+      ["brevo-key", `k="xkeysib-${h(64)}-${A(16)}"`],
+      ["typeform-token", `k="tfp_${A(40)}"`],
+      ["duffel-token", `k="duffel_test_${A(40)}"`],
+      ["easypost-key", `k="EZAK${A(50)}"`],
+    ];
+    it.each(cases)("detects %s", (id, example) => {
+      expect(rules(example)).toContain(id);
+    });
+    it("does not fire any provider rule on benign prose", () => {
+      expect(rules('const greeting = "hello world this is fine";')).toHaveLength(0);
+    });
+  });
+
   it("detects AWS access key (AKIA)", () => {
     const result = scanSecrets(
       makeSnapshot({
