@@ -1,7 +1,8 @@
-// Per-file cap so one secret-packed file can't flood the report. Raised from 10
-// after the CredData benchmark: config/test files legitimately hold dozens of
-// real credentials, and a cap of 10 silently dropped the rest.
-const MAX_FINDINGS_PER_FILE = 50;
+// Per-file ceiling — a backstop against a pathological file flooding output, NOT
+// a feature. The CredData benchmark showed a cap of 50 silently dropped real
+// secrets and halved recall (22% vs 50% with it lifted); raised to 1000 so no
+// real file is truncated. Secret-packed files report everything they contain.
+const MAX_FINDINGS_PER_FILE = 1000;
 const ENTROPY_THRESHOLD = 4.5;
 const MIN_ENTROPY_LENGTH = 8;
 const MOVE_TO_ENV = "Move to environment variables or a secrets manager before prompting";
@@ -57,7 +58,9 @@ const UNQUOTED_VALUE_LANGUAGES = new Set([
 ]);
 const PLACEHOLDER_PATTERNS = [
     /^$/,
-    /^(changeme|change_me|example|test|dummy|fake|xxx|placeholder|none|null|undefined)$/i,
+    /^(changeme|change_me|changeit|example|test|dummy|fake|xxx|placeholder|none|null|undefined)$/i,
+    // Trivial default values (MYSQL_ROOT_PASSWORD: root) — defaults, not secrets.
+    /^(root|admin|administrator|guest|user|username|default|password|secret|enabled?)$/i,
     /^(TODO|FIXME|CHANGEME|REPLACE_ME)/i,
     /^your[-_]/i,
     /^<.*>$/,
@@ -227,10 +230,11 @@ function isKeywordEchoValue(value) {
     // Glued all-lowercase compounds with no boundary to split on: apikey, …
     return /(apikey|accesstoken|refreshtoken|authtoken|secretkey|accesskey|privatekey)/.test(v.toLowerCase());
 }
-// Reserved / documentation hosts (RFC 2606 + localhost / loopback). Credentials
-// pointing at these are examples, not real endpoints — `john.doe:pw@proxy.example.com`,
-// `mongodb://user:pass@localhost`. Used to drop url-embedded / connection-string FPs.
-const DOC_HOST = /(^|\.)(example\.(com|org|net|edu)|test|invalid|local|localhost)$|^(localhost|127\.0\.0\.1|0\.0\.0\.0|::1)$/i;
+// RFC 2606 reserved *documentation* domains only — example.com/.org/.net/.edu and
+// the .test / .invalid TLDs. Credentials pointing here are examples, not endpoints.
+// Deliberately NOT localhost / loopback / .local / real services: CredData labels
+// `user:pass@localhost` as a real secret, and a key on sentry.io is a real service.
+const DOC_HOST = /(^|\.)(example\.(com|org|net|edu)|test|invalid)$/i;
 /** The host portion of a URI/connection string that embeds credentials (the
  *  hostname run right after `@`). Restricted to hostname characters so a trailing
  *  quote/port/path doesn't contaminate it. Empty if there's no `user:pass@host`. */
@@ -283,6 +287,26 @@ function isDottedIdentifierValue(value) {
     const v = value.trim();
     return v.length < 60 && /^[A-Za-z]+(\.[A-Za-z]+)+$/.test(v);
 }
+// A field whose name marks it as a test fixture / mock / expected value
+// (MOCK_ACCESS_TOKEN, expectedPassword, testApiKey) — not a live credential.
+// Splits on separators AND camelCase so the marker is matched as a whole segment
+// (so `latest_token`/`contest_key` are NOT caught).
+const TEST_FIXTURE_WORDS = /^(mock|test|expected|sample|fake|dummy|stub|fixture|demo)$/;
+function isTestFixtureField(keyName) {
+    return keyName
+        .replace(/([a-z])([A-Z])/g, "$1 $2")
+        .toLowerCase()
+        .split(/[-_ ]+/)
+        .some((seg) => TEST_FIXTURE_WORDS.test(seg));
+}
+// A multi-word camelCase/PascalCase identifier with no digits — a code constant
+// or enum name (`keyEquivalentModifierMask`), not a secret. Requires ≥2 case
+// transitions so an all-lowercase passphrase (`correcthorsebattery`) or a single
+// capitalized word (`MyPassword`) is still flagged. Real keys carry digits/entropy.
+function isCodeIdentifierValue(value) {
+    const v = value.trim();
+    return /^[A-Za-z]+$/.test(v) && (v.match(/[a-z][A-Z]/g) ?? []).length >= 2;
+}
 // ─── Layer 3: Shannon Entropy ────────────────────────────────────
 export function shannonEntropy(str) {
     if (str.length === 0)
@@ -304,6 +328,11 @@ function isNonSecretValue(value) {
     return (/^https?:\/\//.test(value) || // URLs
         /^file:\/\//.test(value) || // file URIs
         /^\/[\w-]/.test(value) || // absolute paths
+        // Windows paths: drive-letter (C:\…), UNC (\\server\…), or any value with a
+        // backslash separator (.pdb/.dll build paths). Secrets are drawn from
+        // [A-Za-z0-9_\-+/=.:~] and never contain a backslash — common entropy noise.
+        /^[a-z]:[\\/]/i.test(value) ||
+        /\\/.test(value) ||
         // Relative / home-anchored paths: ./x, ../a/b, ~/dir. A filesystem path is
         // word segments, not a contiguous token — but a long one (../Mend_And_Fortify/
         // Fortify/fortify-emrg-viewgen-scr-Svcs) can score high entropy and be mistaken
@@ -490,6 +519,21 @@ export function scanSecrets(context, _partial) {
                 const isNonKeyField = isEnglishKeyWord(keyName) || isPublicKeyField(keyName);
                 // A dotted property path / i18n key as the value (`key = "home.title"`).
                 const isDottedId = isDottedIdentifierValue(value);
+                // A value containing whitespace is prose/a sentence, not a contiguous
+                // credential token ("Failed to retrieve the generated key.", "Test Secret").
+                const hasWhitespace = /\s/.test(value);
+                // The field is a test fixture / mock (MOCK_ACCESS_TOKEN, expectedPassword).
+                const isTestFixture = isTestFixtureField(keyName);
+                // The value is a multi-word code identifier (keyEquivalentModifierMask).
+                const isCodeIdent = isCodeIdentifierValue(value);
+                // Password-family fields stay permissive (weak real passwords are short and
+                // low-entropy, and vet leads gitleaks here). For key/token/secret/api fields,
+                // require a credential-shaped value: ≥8 chars (gitleaks' floor) and not a
+                // bare primitive type name (Go struct tags `key:"uint32"`). This cuts the
+                // short/structural keyword false alarms without touching passwords.
+                const isPwdField = /pass|pwd/i.test(keyName);
+                const tooShort = !isPwdField && value.trim().length < 8;
+                const isPrimitiveType = /^(u?int(8|16|32|64)?|float(32|64)?|string|bool(ean)?|byte|rune|char|double|long|short|object|void|any|date(time)?|guid|uuid)$/i.test(value.trim());
                 if (!isPlaceholder(value) &&
                     !isFieldEcho &&
                     !isProse &&
@@ -499,7 +543,12 @@ export function scanSecrets(context, _partial) {
                     !isPublicToken &&
                     !isEnvRef &&
                     !isNonKeyField &&
-                    !isDottedId) {
+                    !isDottedId &&
+                    !hasWhitespace &&
+                    !isTestFixture &&
+                    !isCodeIdent &&
+                    !tooShort &&
+                    !isPrimitiveType) {
                     const lifetime = classifyLifetime("keyword-secret", value);
                     secretFindings.push({
                         id: `keyword-${keyName}-${file.path}-${i + 1}`,

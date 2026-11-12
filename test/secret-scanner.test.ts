@@ -746,7 +746,7 @@ describe("scanSecrets", () => {
     expect(result.wastePatterns ?? []).toHaveLength(0);
   });
 
-  it("caps findings at MAX_FINDINGS_PER_FILE (50)", () => {
+  it("reports secret-packed files past the old caps (cap is now 1000)", () => {
     // Keyword must be immediately followed by `=`, so use a real keyword name
     // (api_key) with distinct high-entropy values — one finding per line.
     const lines = Array.from(
@@ -757,9 +757,8 @@ describe("scanSecrets", () => {
       makeSnapshot({ activeFile: fileWithContent(lines) }),
       {}
     );
-    expect(result.secretFindings!.length).toBeLessThanOrEqual(50);
-    // but the cap is 50, not the old 10 — a secret-packed file reports far more
-    expect(result.secretFindings!.length).toBeGreaterThan(10);
+    // all 70 reported — not silently truncated at the old 10 or 50 cap
+    expect(result.secretFindings!.length).toBe(70);
   });
 
   // Dogfood (CredData): a ~150 KB file with a real secret used to be skipped
@@ -1176,9 +1175,20 @@ describe("scanSecrets — false-positive guards", () => {
       expect(scanC('var secretEnv = "GCM_AZREPOS_SP_SECRET";')).toHaveLength(0);
     });
 
-    it("does NOT flag credentials pointed at a reserved/doc host", () => {
+    it("does NOT flag credentials pointed at an RFC 2606 reserved/doc host", () => {
       expect(scanC('p = "http://john.doe:letmein123@proxy.example.com"')).toHaveLength(0);
-      expect(scanC('db = "mongodb://user:pass@localhost:27017/db"')).toHaveLength(0);
+      expect(scanC('p = "http://u:pw12345@api.example.org/x"')).toHaveLength(0);
+    });
+
+    it("DOES flag credentials at localhost / real services (CredData labels these real)", () => {
+      expect(
+        scanC('db = "postgres://user3:Pz9xk2qr@localhost:5555/app"').some((f) => f.layer === 4)
+      ).toBe(true);
+      expect(
+        scanC('s = "https://pub9x:s3cretkey88@o1.ingest.sentry.io/42"').some(
+          (f) => f.ruleId === "url-embedded-credentials"
+        )
+      ).toBe(true);
     });
 
     it("does NOT flag a sequential character run as high entropy", () => {
@@ -1247,6 +1257,40 @@ describe("scanSecrets — false-positive guards", () => {
       expect(scanC('app_key = "app.module.name";')).toHaveLength(0);
       // but a dotted value carrying digits/entropy is still a secret
       expect(scanC('key = "a1b2.c3d4e5f6a7b8c9";').length).toBeGreaterThan(0);
+    });
+  });
+
+  // ─── Tier 2b: keyword-rule precision (CredData v0.1.10 false alarms) ──
+  describe("keyword-rule precision guards", () => {
+    const scanC = (content: string, path = "src/app.cs") =>
+      scanSecrets(makeSnapshot({ activeFile: fileWithContent(content, path) }), {}).secretFindings ??
+      [];
+
+    it("skips short key values (<8 chars) but keeps short passwords", () => {
+      expect(scanC('correlationKey = ".xsrf"')).toHaveLength(0); // short, non-password
+      expect(scanC('db_password = "Sum24!"').length).toBeGreaterThan(0); // password stays
+    });
+
+    it("skips sentence / whitespace values", () => {
+      expect(scanC('key = "Failed to retrieve the generated key."')).toHaveLength(0);
+      expect(scanC('secret = "Test Secret"')).toHaveLength(0);
+    });
+
+    it("skips test/mock/expected fixture fields", () => {
+      expect(scanC('MOCK_ACCESS_TOKEN = "at0987654321xyz"')).toHaveLength(0);
+      expect(scanC('expectedPassword = "letmein123"')).toHaveLength(0);
+      // but a real field with 'test' only as a substring is NOT skipped
+      expect(scanC('latest_token = "a3f9c2e81b7d4056af12cd34"').length).toBeGreaterThan(0);
+    });
+
+    it("skips structural / code 'key' contexts", () => {
+      expect(scanC('key="keyEquivalentModifierMask"')).toHaveLength(0); // camel identifier
+      expect(scanC('key = "uint32"')).toHaveLength(0); // Go struct-tag type
+      expect(scanC('MYSQL_ROOT_PASSWORD: root', "docker-compose.yml")).toHaveLength(0); // trivial
+    });
+
+    it("skips Windows / backslash paths in the entropy layer", () => {
+      expect(scanC('const p = "C:\\\\build\\\\bin\\\\Release\\\\app.pdb";')).toHaveLength(0);
     });
   });
 });
