@@ -361,13 +361,39 @@ function isShortWordValue(value: string): boolean {
 //   - domain/label keys w/ path:  "k8s.io/zone"
 function isStructuralValue(value: string): boolean {
   const v = value.trim();
+  // A printf format string is template-shaped: alphanumerics, path/format chars,
+  // and a format verb — NOT the dense symbols of a random password. So `%s` only
+  // counts as a format string when the WHOLE value is template-shaped; a password
+  // like "e!@$%s^&*j)_x+m." (which contains %s) keeps getting flagged.
+  const isFormatString =
+    /%[-+ #0]*\d*\.?\d*[sdifxXeEgGcvp]/.test(v) && /^[\w%.${}/:,*+\s()-]+$/.test(v);
   return (
     /\*{3,}/.test(v) ||
-    /%[-+ #0]*\d*\.?\d*[sdifxXeEgGcvp]/.test(v) ||
+    isFormatString ||
     /^[A-Za-z][A-Za-z ]*:$/.test(v) ||
     /^[a-z0-9-]+(\.[a-z0-9-]+)+\/[\w.\-/]*$/i.test(v)
   );
 }
+
+// Does the value carry enough randomness to be a credential? gitleaks' generic
+// rule gates on this. A real key/token is high-entropy; a word, name, or slug
+// (`server-2`, `Whatever`, `textArea2`) is not. Applied to NON-password fields
+// only — real passwords are often low-entropy, which is vet's recall edge.
+// Threshold ~3.0 keeps kebab passphrases (`my-super-secret-key` ≈ 3.4) and short
+// mixed tokens (`Ab3Xy9Qm2` ≈ 3.2) while dropping words (`server-2` ≈ 2.5).
+function looksRandom(value: string): boolean {
+  const v = value.trim();
+  if (v.length < 6) return false; // too short to judge; other guards handle these
+  const e = shannonEntropy(v);
+  return e >= 3.0 || (v.length >= 20 && e >= 2.6);
+}
+
+// A UUID value (with dashes). On its own it's an identifier, but assigned near a
+// token/secret keyword it's a credential (Go `tokenC := "…"`, a function argument).
+const UUID_VALUE = /\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b/i;
+// Substring (not word-bounded) so it matches camelCase/suffixed names like
+// `tokenC`, `authToken`, `setAuthToken`. Deliberately not bare `key`/`auth`.
+const TOKEN_CONTEXT = /(token|secret|credential|api[_-]?key|apikey)/i;
 
 // Code-structure punctuation (brackets/braces/angles, or a comma) — Go struct
 // tags `key:"value9,range=[1:5]"`, arrays, generics. NON-password only: real
@@ -759,6 +785,10 @@ export function scanSecrets(
           isStructuralValue(value) ||
           isSequentialRun(value) ||
           (!isPwdField && hasCodePunctuation(value));
+        // Randomness gate (gitleaks-style): a non-password value that isn't random
+        // enough is a word/name/slug, not a credential (`server-2`, `Whatever`).
+        // Passwords are exempt — real passwords are often low-entropy (vet's edge).
+        const isNotRandom = !isPwdField && !looksRandom(value);
         if (
           !isPlaceholder(value) &&
           !isFieldEcho &&
@@ -777,7 +807,8 @@ export function scanSecrets(
           !isPrimitiveType &&
           !isWordValue &&
           !isNonAscii &&
-          !isStructural
+          !isStructural &&
+          !isNotRandom
         ) {
           const lifetime = classifyLifetime("keyword-secret", value);
           secretFindings.push({
@@ -795,6 +826,31 @@ export function scanSecrets(
           });
           flaggedLines.add(i);
         }
+      }
+    }
+
+    // Layer 2b: a UUID value near a token/secret keyword — e.g. Go `tokenC :=
+    // "7154…"`, or a UUID passed as a function argument. The keyword-assignment
+    // pattern misses these (name doesn't end in the keyword, or no `=`); the
+    // token/secret context on the line makes the UUID a credential, not an id.
+    if (!flaggedLines.has(i)) {
+      const um = UUID_VALUE.exec(line);
+      if (um && TOKEN_CONTEXT.test(line)) {
+        const lifetime = classifyLifetime("keyword-secret", um[0]);
+        secretFindings.push({
+          id: `keyword-uuid-${file.path}-${i + 1}`,
+          filePath: file.path,
+          lineNumber: i + 1,
+          ruleId: "keyword-secret",
+          layer: 2,
+          severity: "warning",
+          label: "Hardcoded secret",
+          description: `Hardcoded token (UUID) in ${fileName(file.path)} line ${i + 1}`,
+          matchPreview: redact(um[0]),
+          suggestion: suggestionFor(lifetime),
+          lifetime,
+        });
+        flaggedLines.add(i);
       }
     }
 

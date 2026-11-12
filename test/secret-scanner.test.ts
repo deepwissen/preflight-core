@@ -1445,4 +1445,41 @@ describe("scanSecrets — false-positive guards", () => {
       expect(scanC('secret = "aGVsbG8vd29ybGQK2n9Qz="').length).toBeGreaterThan(0);
     });
   });
+
+  // ─── Randomness gate + format-string nuance + UUID context (engine 0.1.23) ──
+  describe("randomness gate, format-string nuance, UUID context", () => {
+    const scanC = (content: string, path = "src/app.cs") =>
+      scanSecrets(makeSnapshot({ activeFile: fileWithContent(content, path) }), {}).secretFindings ??
+      [];
+
+    // Item 1: a format specifier inside a RANDOM value is a password, not a template.
+    it("keeps random passwords that happen to contain %s or [", () => {
+      expect(scanC('password = "e!@$%s^&*j)_x+m."').length).toBeGreaterThan(0);
+      expect(scanC('password = "[Y@969zXq!"').length).toBeGreaterThan(0);
+      expect(scanC('key = "plugin.%s.src.subdir"')).toHaveLength(0); // real format string
+    });
+
+    // Item 2: non-password values must look random; passwords are exempt.
+    it("drops non-random values on key/token/secret fields, keeps random ones", () => {
+      expect(scanC('api_key = "server-2"')).toHaveLength(0);
+      expect(scanC('secret = "Whatever"')).toHaveLength(0);
+      expect(scanC('api_key = "aZ9$kq2!Lm8@"').length).toBeGreaterThan(0);
+      expect(scanC('jwt_secret: "my-super-secret-key"', "a.yaml").length).toBeGreaterThan(0);
+    });
+
+    // Item 3: a UUID near a token/secret keyword is a credential (Go :=, func arg).
+    it("flags UUID values near a token/secret keyword, not bare UUIDs", () => {
+      expect(scanC('tokenC := "7154a8e2-1234-41d4-a716-446655440000"', "a.go").length).toBeGreaterThan(0);
+      expect(scanC('setAuthToken("7154a8e2-1234-41d4-a716-446655440000")', "a.ts").length).toBeGreaterThan(0);
+      expect(scanC('sessionId = "7154a8e2-1234-41d4-a716-446655440000"')).toHaveLength(0);
+    });
+
+    it("always flags an AKIA access key ID, even inside a URL", () => {
+      expect(
+        scanC(
+          'url = "https://s3.amazonaws.com/b?X-Amz-Credential=AKIAIOSFODNN7EXAMPLE%2F2024"'
+        ).some((f) => f.ruleId === "aws-access-key")
+      ).toBe(true);
+    });
+  });
 });
