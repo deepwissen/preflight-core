@@ -23,12 +23,23 @@ const PROVIDER_PREFIXES = [
         label: "Private Key",
         pattern: /-----BEGIN[A-Z ]*PRIVATE KEY-----/,
     },
+    // JSON Web Token: header.payload.signature, header & payload base64url of JSON
+    // starting `{"` → `eyJ`. The `eyJ…eyJ…` double structure is essentially unique
+    // to JWTs, so this is high-precision and catches bare tokens and `Bearer eyJ…`
+    // (which the quoted-string entropy layer never sees).
+    {
+        id: "jwt",
+        label: "JSON Web Token",
+        pattern: /eyJ[A-Za-z0-9_-]{8,}\.eyJ[A-Za-z0-9_-]{6,}\.[A-Za-z0-9_-]{6,}/,
+    },
 ];
 // ─── Layer 2: Keyword + Assignment ───────────────────────────────
-// Quoted values — works in any language
-const KEYWORD_PATTERN = /\b(\w*(?:password|passwd|pwd|pass|secret|token|api_key|apikey|auth_key|private_key|access_key|secret_key|conn_str|connection_string))\s*[:=]>?\s*["'`]([^"'`\n]{1,200})["'`]/i;
+// Quoted values — works in any language. Bare `key` catches app_key/encryption_key/
+// signing_key/appKey (missed before); English `-key` words (monkey, hockey) and
+// public keys are filtered after the match by isEnglishKeyWord / isPublicKeyField.
+const KEYWORD_PATTERN = /\b(\w*(?:password|passwd|pwd|pass|secret|token|api_key|apikey|auth_key|private_key|access_key|secret_key|key|conn_str|connection_string))\s*[:=]>?\s*["'`]([^"'`\n]{1,200})["'`]/i;
 // Unquoted values — for YAML, .properties, .ini, .env, TOML, config files
-const KEYWORD_UNQUOTED_PATTERN = /\b(\w*(?:password|passwd|pwd|pass|secret|token|api_key|apikey|auth_key|private_key|access_key|secret_key|conn_str|connection_string))\s*[:=]\s*(\S+)\s*$/i;
+const KEYWORD_UNQUOTED_PATTERN = /\b(\w*(?:password|passwd|pwd|pass|secret|token|api_key|apikey|auth_key|private_key|access_key|secret_key|key|conn_str|connection_string))\s*[:=]\s*(\S+)\s*$/i;
 const UNQUOTED_VALUE_LANGUAGES = new Set([
     "yaml",
     "properties",
@@ -252,6 +263,26 @@ function isSequentialRun(value) {
 function isPublicKeyTokenField(keyName) {
     return /publickeytoken/i.test(keyName.replace(/[-_]/g, ""));
 }
+// The bare `key` keyword matches any field ending in "key" — including English
+// words where "key" is glued to letters (monkey, donkey, turkey, whiskey, hockey,
+// turnkey). A real key field has "key" as its own segment: a non-letter before it
+// (app_key, api-key, MY_KEY, bare key) or a camelCase boundary (appKey). This flags
+// the English words only; `app_key` etc. and the explicit keywords are unaffected.
+function isEnglishKeyWord(keyName) {
+    return /[a-z]key$/i.test(keyName) && !/[a-z]Key$/.test(keyName);
+}
+// A public key / token is published by design, not a secret (public_key, pubkey,
+// publicKey, public-token).
+function isPublicKeyField(keyName) {
+    return /^pub(lic)?[_-]?(key|token)s?$/i.test(keyName);
+}
+// A dotted identifier / property path used as a value — an i18n key or config
+// reference (`home.title`, `app.module.name`), not a credential. Purely alphabetic
+// segments only, so anything with digits/entropy (real keys, JWTs) is unaffected.
+function isDottedIdentifierValue(value) {
+    const v = value.trim();
+    return v.length < 60 && /^[A-Za-z]+(\.[A-Za-z]+)+$/.test(v);
+}
 // ─── Layer 3: Shannon Entropy ────────────────────────────────────
 export function shannonEntropy(str) {
     if (str.length === 0)
@@ -454,6 +485,11 @@ export function scanSecrets(context, _partial) {
                 // an env-var *name* reference, not a literal secret (CredData false alarms).
                 const isPublicToken = isPublicKeyTokenField(keyName);
                 const isEnvRef = isEnvVarNameValue(value);
+                // The bare `key` keyword also matches English `-key` words (monkey, hockey)
+                // and public-key fields — neither is a secret.
+                const isNonKeyField = isEnglishKeyWord(keyName) || isPublicKeyField(keyName);
+                // A dotted property path / i18n key as the value (`key = "home.title"`).
+                const isDottedId = isDottedIdentifierValue(value);
                 if (!isPlaceholder(value) &&
                     !isFieldEcho &&
                     !isProse &&
@@ -461,7 +497,9 @@ export function scanSecrets(context, _partial) {
                     !inArn &&
                     !isCodeExpr &&
                     !isPublicToken &&
-                    !isEnvRef) {
+                    !isEnvRef &&
+                    !isNonKeyField &&
+                    !isDottedId) {
                     const lifetime = classifyLifetime("keyword-secret", value);
                     secretFindings.push({
                         id: `keyword-${keyName}-${file.path}-${i + 1}`,

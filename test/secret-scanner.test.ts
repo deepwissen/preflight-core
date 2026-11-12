@@ -932,13 +932,13 @@ describe("scanSecrets — credential lifetime", () => {
   });
 
   it("classifies a detected JWT WITHOUT an exp claim as unknown (not short-lived)", () => {
-    // Boundary: lifetime only applies to *detected* secrets. This JWT is high-entropy
-    // enough to be flagged, its payload {"sub":"user123","role":"admin","iat":...} has
-    // NO exp — so it must not be treated as short-lived.
+    // A JWT is now detected explicitly (Layer 1 `jwt`). Its payload
+    // {"sub":"user123","role":"admin","iat":…} has NO exp — so lifetime must be
+    // unknown, not short-lived.
     const jwtNoExp =
       "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJ1c2VyMTIzIiwicm9sZSI6ImFkbWluIiwiaWF0IjoxNzAwMDAwMDAwfQ.K7pQ2mZx9RtVn4LbW8yE3jF6gD1cA5sN0uP2qXrJ8v";
     const f = first(`const t = "${jwtNoExp}";`);
-    expect(f.ruleId).toBe("high-entropy");
+    expect(f.ruleId).toBe("jwt");
     expect(f.lifetime).toBe("unknown");
   });
 });
@@ -1203,6 +1203,50 @@ describe("scanSecrets — false-positive guards", () => {
       expect(
         scanC('api_key = "sk-live-Xk9Qm2Lp8Rv4Tn6Wz0Bc";').some((f) => f.ruleId === "keyword-secret")
       ).toBe(true);
+    });
+  });
+
+  // ─── Tier 3 recall additions (CredData detection gaps) ───────────
+  describe("CredData detection gaps", () => {
+    const scanC = (content: string, path = "src/app.cs") =>
+      scanSecrets(makeSnapshot({ activeFile: fileWithContent(content, path) }), {}).secretFindings ??
+      [];
+
+    // JWTs — detected explicitly, including unquoted `Bearer eyJ…` the entropy
+    // layer never saw.
+    it("detects a JWT (eyJ.eyJ.sig), quoted or in an Authorization header", () => {
+      const jwt =
+        "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0In0.SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJV";
+      expect(scanC(`const t = "${jwt}";`).some((f) => f.ruleId === "jwt")).toBe(true);
+      expect(scanC(`Authorization: Bearer ${jwt}`).some((f) => f.ruleId === "jwt")).toBe(true);
+    });
+
+    // Generic key fields (the biggest gap: 9% → up). The value drives it, but the
+    // field name `app_key`/`key`/`appKey` is now recognized even below the entropy
+    // threshold.
+    it("flags generic key fields missed before (app_key / key / appKey / MY_KEY)", () => {
+      expect(scanC('app_key = "a3f9c2e81b7d4056af12cd34ef567890";').length).toBeGreaterThan(0);
+      expect(scanC('key = "a3f9c2e81b7d4056af12cd34";').length).toBeGreaterThan(0);
+      expect(scanC('appKey = "a3f9c2e81b7d4056af12cd34";').length).toBeGreaterThan(0);
+      expect(scanC("MY_KEY=a3f9c2e81b7d4056af12cd34", "app.env").length).toBeGreaterThan(0);
+    });
+
+    // Negative controls for the bare `key` keyword — must NOT turn English words
+    // or public keys into secrets.
+    it("does NOT flag English -key words or public keys", () => {
+      for (const kw of ["monkey", "donkey", "turnkey", "hockey"]) {
+        expect(scanC(`${kw} = "a3f9c2e81b7d4056af12cd34";`)).toHaveLength(0);
+      }
+      expect(scanC('public_key = "a3f9c2e81b7d4056af12cd34";')).toHaveLength(0);
+      expect(scanC('pubkey = "a3f9c2e81b7d4056af12cd34";')).toHaveLength(0);
+      expect(scanC('publicKey = "a3f9c2e81b7d4056af12cd34";')).toHaveLength(0);
+    });
+
+    it("does NOT flag a dotted i18n/property path as a key value", () => {
+      expect(scanC('const key = "home.title";')).toHaveLength(0);
+      expect(scanC('app_key = "app.module.name";')).toHaveLength(0);
+      // but a dotted value carrying digits/entropy is still a secret
+      expect(scanC('key = "a1b2.c3d4e5f6a7b8c9";').length).toBeGreaterThan(0);
     });
   });
 });
