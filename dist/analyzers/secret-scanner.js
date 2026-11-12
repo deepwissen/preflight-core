@@ -1,4 +1,7 @@
-const MAX_FINDINGS_PER_FILE = 10;
+// Per-file cap so one secret-packed file can't flood the report. Raised from 10
+// after the CredData benchmark: config/test files legitimately hold dozens of
+// real credentials, and a cap of 10 silently dropped the rest.
+const MAX_FINDINGS_PER_FILE = 50;
 const ENTROPY_THRESHOLD = 4.5;
 const MIN_ENTROPY_LENGTH = 8;
 const MOVE_TO_ENV = "Move to environment variables or a secrets manager before prompting";
@@ -141,8 +144,14 @@ function commentPatternFor(path, languageId) {
 function shouldSkipLine(line, commentPattern) {
     return commentPattern.test(line);
 }
+// Files larger than this are skipped entirely (returns no findings). Raised from
+// 100 KB to 1 MB after the CredData benchmark showed the old cap silently hid ~32%
+// of real secrets — it now matches the vet CLI's own 1 MB byte cap, so a file the
+// CLI reads is a file the scanner actually scans. Callers that skip a file for
+// size MUST surface that (a silent skip reads as "clean", which is false).
+const MAX_SCAN_CHARS = 1_000_000;
 function shouldSkipFile(path, contentLength) {
-    if (contentLength > 100_000)
+    if (contentLength > MAX_SCAN_CHARS)
         return true;
     if (TEST_FILE_PATTERN.test(path))
         return true;

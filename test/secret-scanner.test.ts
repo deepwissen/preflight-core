@@ -746,16 +746,37 @@ describe("scanSecrets", () => {
     expect(result.wastePatterns ?? []).toHaveLength(0);
   });
 
-  it("caps findings at MAX_FINDINGS_PER_FILE", () => {
+  it("caps findings at MAX_FINDINGS_PER_FILE (50)", () => {
+    // Keyword must be immediately followed by `=`, so use a real keyword name
+    // (api_key) with distinct high-entropy values — one finding per line.
     const lines = Array.from(
-      { length: 20 },
-      (_, i) => `password_${i} = "secret-value-${i}!@#"`
+      { length: 70 },
+      (_, i) => `api_key = "sk-live-${i}-Xk9Qm2Lp8Rv4Tn6Wz0Bc"`
     ).join("\n");
     const result = scanSecrets(
       makeSnapshot({ activeFile: fileWithContent(lines) }),
       {}
     );
-    expect(result.secretFindings!.length).toBeLessThanOrEqual(10);
+    expect(result.secretFindings!.length).toBeLessThanOrEqual(50);
+    // but the cap is 50, not the old 10 — a secret-packed file reports far more
+    expect(result.secretFindings!.length).toBeGreaterThan(10);
+  });
+
+  // Dogfood (CredData): a ~150 KB file with a real secret used to be skipped
+  // entirely by the old 100 KB cap and reported as clean. It must be scanned now.
+  it("scans files between 100 KB and 1 MB (old limit silently hid these)", () => {
+    const filler = "// a harmless comment line of code\n".repeat(4000); // ~140 KB
+    const content = filler + 'aws_key = "AKIAIOSFODNN7EXAMPLE1"\n';
+    expect(content.length).toBeGreaterThan(100_000);
+    expect(content.length).toBeLessThan(1_000_000);
+    const result = scanSecrets(makeSnapshot({ activeFile: fileWithContent(content) }), {});
+    expect(result.secretFindings!.some((f) => f.ruleId === "aws-access-key")).toBe(true);
+  });
+
+  it("still skips files over 1 MB (bounded work)", () => {
+    const content = "x".repeat(1_000_001) + '\naws_key = "AKIAIOSFODNN7EXAMPLE1"';
+    const result = scanSecrets(makeSnapshot({ activeFile: fileWithContent(content) }), {});
+    expect(result.secretFindings ?? []).toHaveLength(0);
   });
 
   it("redacts matched values in preview", () => {
