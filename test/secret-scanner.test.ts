@@ -1372,4 +1372,25 @@ describe("scanSecrets — false-positive guards", () => {
       ).toBe(true);
     });
   });
+
+  // ─── Randomness slice: short all-letter values on non-password fields ──
+  describe("short-word value guard (non-password keyword fields)", () => {
+    const scanC = (content: string, path = "src/app.cs") =>
+      scanSecrets(makeSnapshot({ activeFile: fileWithContent(content, path) }), {}).secretFindings ??
+      [];
+
+    it("skips short all-letter / reference values on key/token/secret fields", () => {
+      expect(scanC('ClientSecret = "Whatever;"')).toHaveLength(0); // word + trailing punct
+      expect(scanC("- key: Corefile", "a.yaml")).toHaveLength(0); // unquoted short word
+      expect(scanC("api_key = process.env.API_KEY", "a.ts")).toHaveLength(0); // code reference
+      expect(scanC("password = var.db_password", "a.tf")).toHaveLength(0); // terraform reference
+    });
+
+    it("STILL flags credential-shaped values (digits/entropy, ≥12-char passphrases)", () => {
+      expect(scanC('app_key = "a3f9c2e81b7d4056af12cd34"').length).toBeGreaterThan(0);
+      expect(scanC('token = "Ab3Xy9Qm2"').length).toBeGreaterThan(0); // short but has digits
+      expect(scanC('jwt_secret: "my-super-secret-key"', "a.yaml").length).toBeGreaterThan(0); // ≥12
+      expect(scanC('token = "550e8400-e29b-41d4-a716-446655440000"').length).toBeGreaterThan(0); // UUID
+    });
+  });
 });

@@ -283,12 +283,22 @@ function isEnglishKeyWord(keyName) {
 function isPublicKeyField(keyName) {
     return /^pub(lic)?[_-]?(key|token)s?$/i.test(keyName);
 }
-// A dotted identifier / property path used as a value — an i18n key or config
-// reference (`home.title`, `app.module.name`), not a credential. Purely alphabetic
-// segments only, so anything with digits/entropy (real keys, JWTs) is unaffected.
+// A dotted identifier / property path or code reference used as a value — an i18n
+// key (`home.title`), config path (`app.module.name`), or a variable reference
+// (`var.db_password`, `process.env.API_KEY`). Not a literal secret. Segments are
+// letters + underscores only (no digits), so real keys / JWTs are unaffected.
 function isDottedIdentifierValue(value) {
     const v = value.trim();
-    return v.length < 60 && /^[A-Za-z]+(\.[A-Za-z]+)+$/.test(v);
+    return v.length < 60 && /^[A-Za-z][A-Za-z_]*(\.[A-Za-z][A-Za-z_]*)+$/.test(v);
+}
+// For non-password keyword fields only: a short all-letter value is a word or
+// identifier, not a credential (`key: Corefile`, `ClientSecret = "Whatever;"`).
+// Real keys/tokens carry digits/entropy; passwords are exempt (weak real passwords
+// are short words). Trailing punctuation is stripped first. The 12-char floor keeps
+// kebab/snake passphrases (`my-super-secret-key`) flagged.
+function isShortWordValue(value) {
+    const v = value.trim().replace(/[;,.:!?]+$/, "");
+    return v.length >= 1 && v.length < 12 && /^[A-Za-z][A-Za-z_-]*$/.test(v);
 }
 // A field whose name marks it as a test fixture / mock / expected value
 // (MOCK_ACCESS_TOKEN, expectedPassword, testApiKey) — not a live credential.
@@ -620,6 +630,10 @@ export function scanSecrets(context, _partial) {
                 const isPwdField = /pass|pwd/i.test(keyName);
                 const tooShort = !isPwdField && value.trim().length < 8;
                 const isPrimitiveType = /^(u?int(8|16|32|64)?|float(32|64)?|string|bool(ean)?|byte|rune|char|double|long|short|object|void|any|date(time)?|guid|uuid)$/i.test(value.trim());
+                // Randomness slice: on non-password fields, a short all-letter value is a
+                // word/identifier, not a credential (`ClientSecret = "Whatever;"`, `key:
+                // Corefile`). Real keys carry digits/entropy; passwords are exempt.
+                const isWordValue = !isPwdField && isShortWordValue(value);
                 if (!isPlaceholder(value) &&
                     !isFieldEcho &&
                     !isProse &&
@@ -634,7 +648,8 @@ export function scanSecrets(context, _partial) {
                     !isTestFixture &&
                     !isCodeIdent &&
                     !tooShort &&
-                    !isPrimitiveType) {
+                    !isPrimitiveType &&
+                    !isWordValue) {
                     const lifetime = classifyLifetime("keyword-secret", value);
                     secretFindings.push({
                         id: `keyword-${keyName}-${file.path}-${i + 1}`,
