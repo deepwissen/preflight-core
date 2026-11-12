@@ -86,6 +86,11 @@ const PLACEHOLDER_PATTERNS = [
     /^(true|false|yes|no|on|off|enabled?|disabled?)$/i,
     // A plain integer (token_ttl: 3600, max_retries: 5) is config, never a secret.
     /^\d+$/,
+    // A masked value ('password': '********') — a redaction, not a secret.
+    /^[*•●∗•●]{3,}$/,
+    // A version / semver range (package.json deps: "getpass": "^0.1.1", "~2.2.1",
+    // ">=1.0.0", "1.2.3") — a dependency spec on a *pass/*key-named package, not a secret.
+    /^[~^>=<\s]*v?\d+\.\d+(\.\d+)?([-+.][\w.]+)?$/,
 ];
 function isPlaceholder(value) {
     return PLACEHOLDER_PATTERNS.some((p) => p.test(value.trim()));
@@ -329,6 +334,10 @@ const AUTH_HEADER = /\b(?:proxy-)?authorization\s*[:=]\s*["'`]?\s*(basic|bearer|
 // value `"value": "Basic ZHR4…=="`. Safe because the base64 must decode to real
 // `user:pass` (prose like "Basic authentication" is rejected by that check).
 const BASIC_STANDALONE = /\bBasic\s+([A-Za-z0-9+/]{16,}={0,2})/;
+// Standalone `Bearer <token>` without the `Authorization:` prefix (`"value":
+// "Bearer ru4o…"`). Requires a ≥20-char token AND a credential shape (a digit, or
+// base64/JWT punctuation) so prose like "Bearer bonds are financial" is rejected.
+const BEARER_STANDALONE = /\bBearer\s+([A-Za-z0-9._-]{20,})/;
 // Common placeholder passwords in URL credentials — doc/example values, not real
 // secrets (minio:changeme@…, user:password@…).
 const PLACEHOLDER_PASSWORD = /^(changeme|change_me|password|passwd|pass|pwd|secret|user(name)?|admin|root|example|examplepass|test|xxx+|your[_-]?password|placeholder)$/i;
@@ -533,6 +542,15 @@ export function scanSecrets(context, _partial) {
                     scheme = "basic";
                     cred = sm[1];
                 }
+                else {
+                    const bs = BEARER_STANDALONE.exec(line);
+                    // Credential-shaped only (a digit or base64/JWT punctuation) so prose
+                    // like "Bearer bonds are financial instruments" is rejected.
+                    if (bs && /[0-9._-]/.test(bs[1])) {
+                        scheme = "bearer";
+                        cred = bs[1];
+                    }
+                }
             }
             if (cred) {
                 let detected = !isPlaceholder(cred) && !isEnvVarNameValue(cred) && !isInterpolation(cred);
@@ -634,6 +652,10 @@ export function scanSecrets(context, _partial) {
                 // word/identifier, not a credential (`ClientSecret = "Whatever;"`, `key:
                 // Corefile`). Real keys carry digits/entropy; passwords are exempt.
                 const isWordValue = !isPwdField && isShortWordValue(value);
+                // A value containing non-printable-ASCII characters is translated UI text,
+                // not a secret (`"lockPassword": "パスワード"`, "пароль", "账户密码"). Real
+                // secrets are drawn from printable ASCII.
+                const isNonAscii = /[^ -~]/.test(value);
                 if (!isPlaceholder(value) &&
                     !isFieldEcho &&
                     !isProse &&
@@ -649,7 +671,8 @@ export function scanSecrets(context, _partial) {
                     !isCodeIdent &&
                     !tooShort &&
                     !isPrimitiveType &&
-                    !isWordValue) {
+                    !isWordValue &&
+                    !isNonAscii) {
                     const lifetime = classifyLifetime("keyword-secret", value);
                     secretFindings.push({
                         id: `keyword-${keyName}-${file.path}-${i + 1}`,

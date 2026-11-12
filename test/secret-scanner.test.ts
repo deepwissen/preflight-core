@@ -1393,4 +1393,30 @@ describe("scanSecrets — false-positive guards", () => {
       expect(scanC('token = "550e8400-e29b-41d4-a716-446655440000"').length).toBeGreaterThan(0); // UUID
     });
   });
+
+  // ─── JSON-driven false alarms + standalone Bearer (engine 0.1.21 follow-up) ──
+  describe("JSON false-alarm cleanup + standalone Bearer", () => {
+    const scanC = (content: string, path = "config.json") =>
+      scanSecrets(makeSnapshot({ activeFile: fileWithContent(content, path) }), {}).secretFindings ??
+      [];
+
+    it("skips non-ASCII translation values", () => {
+      expect(scanC('{ "lockPassword": "パスワード" }')).toHaveLength(0);
+      expect(scanC('{ "password": "пароль" }')).toHaveLength(0);
+      expect(scanC('{ "password": "账户密码" }')).toHaveLength(0);
+    });
+
+    it("skips version ranges and masked values", () => {
+      expect(scanC('{ "getpass": "^0.1.1" }', "package.json")).toHaveLength(0);
+      expect(scanC('{ "minipass": "~2.2.1" }', "package.json")).toHaveLength(0);
+      expect(scanC('{ "password": "********************" }')).toHaveLength(0);
+    });
+
+    it("flags a standalone `Bearer <token>` (JSON value), rejects prose", () => {
+      expect(scanC('{ "value": "Bearer ru4o7fYmZ9xKpQ2wErTy6uI" }')[0]?.ruleId).toBe(
+        "auth-header-bearer"
+      );
+      expect(scanC("Bearer bonds are financial instruments")).toHaveLength(0);
+    });
+  });
 });
