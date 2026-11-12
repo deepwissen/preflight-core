@@ -559,9 +559,18 @@ function isNonSecretValue(value) {
         // entropy. Keyword-based secrets with spaces are still caught by Layer 2.
         /\s/.test(value) ||
         // Contains CSS/markup/code structural punctuation — SVG path data ("M10,20L…"),
-        // inline styles ("fill:#fff;stroke:…"), minified JS/CSS. Real credential tokens
-        // are drawn from [A-Za-z0-9_\-+/=.:~] and never contain ; { } < > ( ) or commas.
-        /[;{}<>(),]/.test(value) ||
+        // inline styles ("fill:#fff;stroke:…"), minified JS/CSS, or an AWS model /
+        // Smithy shape id ("com.amazonaws.kendra#ListDataSources", "shape#NotFound").
+        // Real credential tokens never contain ; { } < > ( ) , or #.
+        /[;{}<>(),#]/.test(value) ||
+        // Non-printable-ASCII → translated text (Django .po files, docs/ja), not a
+        // secret. (The keyword layer had this; the entropy layer did not.)
+        /[^ -~]/.test(value) ||
+        // Reverse-DNS identifier or dotted hostname — AWS/Smithy namespaces
+        // ("com.amazonaws.kendra") and internal hostnames with hash segments
+        // ("x.dc2.internal.e5b0abc.consul"). 3+ dotted word segments; secrets don't
+        // have dots (JWTs are caught by Layer 1).
+        /^[\w-]+(\.[\w-]+){2,}\.?$/.test(value) ||
         // Contains a URL/URI scheme anywhere (namespaces, endpoints). Any *credentialed*
         // URL is still flagged separately by the connection-string layer.
         /\w+:\/\//.test(value));

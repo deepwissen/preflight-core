@@ -583,6 +583,30 @@ describe("scanSecrets", () => {
     expect(result.secretFindings!.filter((f) => f.layer === 3)).toHaveLength(0);
   });
 
+  // Noise benchmark (engine 0.1.26): the high-entropy rule fired on identifiers,
+  // hostnames and translated text. These must NOT be high-entropy findings.
+  describe("high-entropy noise guards", () => {
+    const l3 = (c: string, p = "a.ts") =>
+      (scanSecrets(makeSnapshot({ activeFile: fileWithContent(c, p) }), {}).secretFindings ?? [])
+        .filter((f) => f.layer === 3)
+        .length;
+    it("skips AWS model / Smithy shape ids (contain #)", () => {
+      expect(l3('const s = "com.amazonaws.kendra#ListDataSources";')).toBe(0);
+      expect(l3('shapeId = "smithy.api#ClusterNotFoundException";')).toBe(0);
+    });
+    it("skips reverse-DNS ids and dotted hostnames", () => {
+      expect(l3('pkg = "com.amazonaws.services.dynamodb.model";')).toBe(0);
+      expect(l3('addr = "node1.dc2.internal.e5b0abc9f3d2.consul";', "a.go")).toBe(0);
+    });
+    it("skips non-ASCII translation text (.po / docs)", () => {
+      expect(l3('msgstr "パスワードを入力"', "a.po")).toBe(0);
+      expect(l3('desc = "账户密码配置选项"', "a.md")).toBe(0);
+    });
+    it("STILL flags a real high-entropy token (no dots/#/non-ascii)", () => {
+      expect(l3('const c = "a8K3mZp9Qw2LxNvB7yH4jR6tF5gE1cD";')).toBeGreaterThan(0);
+    });
+  });
+
   // Dogfood: a long relative path scores high entropy and was flagged "Potential
   // secret". A filesystem path (absolute, relative ./ ../, home ~/, or bare a/b/c)
   // is word segments, not a credential.
