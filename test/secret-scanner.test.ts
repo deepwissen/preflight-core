@@ -662,7 +662,7 @@ describe("scanSecrets", () => {
   it("detects PostgreSQL connection string", () => {
     const result = scanSecrets(
       makeSnapshot({
-        activeFile: fileWithContent('db_url = "postgresql://user:secret@localhost:5432/app";'),
+        activeFile: fileWithContent('db_url = "postgresql://user:s3cret@db.acme.io:5432/app";'),
       }),
       {}
     );
@@ -825,7 +825,7 @@ describe("scanSecrets — adversarial hardening", () => {
   });
 
   it("flags credentials embedded in a URL", () => {
-    const r = scan('const u = "https://admin:Sup3rS3cr3tPw@internal.example.com/api";');
+    const r = scan('const u = "https://admin:Sup3rS3cr3tPw@internal.acme-corp.com/api";');
     expect(r.secretFindings.some((f) => f.ruleId === "url-embedded-credentials")).toBe(true);
   });
 
@@ -1152,13 +1152,57 @@ describe("scanSecrets — false-positive guards", () => {
         scanSecrets(
           makeSnapshot({
             activeFile: fileWithContent(
-              'const u = "https://admin:hunter2pass@db.example.com/x";',
+              'const u = "https://admin:hunter2pass@db.acme-corp.com/x";',
               "src/db.ts"
             ),
           }),
           {}
         ).secretFindings ?? [];
       expect(f.some((x) => x.ruleId === "url-embedded-credentials")).toBe(true);
+    });
+  });
+
+  // ─── Tier 2 precision guards (Samsung CredData false alarms) ──────
+  describe("CredData false-alarm guards", () => {
+    const scanC = (content: string, path = "src/app.cs") =>
+      scanSecrets(makeSnapshot({ activeFile: fileWithContent(content, path) }), {}).secretFindings ??
+      [];
+
+    it("does NOT flag a .NET PublicKeyToken (public identity, not a secret)", () => {
+      expect(scanC('ref assembly, PublicKeyToken="b77a5c561934e089"')).toHaveLength(0);
+    });
+
+    it("does NOT flag a screaming-snake env-var NAME used as a value", () => {
+      expect(scanC('var secretEnv = "GCM_AZREPOS_SP_SECRET";')).toHaveLength(0);
+    });
+
+    it("does NOT flag credentials pointed at a reserved/doc host", () => {
+      expect(scanC('p = "http://john.doe:letmein123@proxy.example.com"')).toHaveLength(0);
+      expect(scanC('db = "mongodb://user:pass@localhost:27017/db"')).toHaveLength(0);
+    });
+
+    it("does NOT flag a sequential character run as high entropy", () => {
+      expect(scanC('const s = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";')).toHaveLength(0);
+      expect(scanC('const n = "012345678901234567890";')).toHaveLength(0);
+    });
+
+    // Positive controls — the guards must not blind real secrets.
+    it("STILL flags embedded creds at a real host", () => {
+      expect(
+        scanC('u = "postgres://admin:Pr0dP8ssxyz@db.acme-corp.io:5432/app"').some(
+          (f) => f.layer === 4
+        )
+      ).toBe(true);
+    });
+    it("STILL flags a real high-entropy secret (not sequential)", () => {
+      expect(
+        scanC('const c = "a8K3mZp9Qw2LxNvB7yH4jR6tF";').some((f) => f.ruleId === "high-entropy")
+      ).toBe(true);
+    });
+    it("STILL flags a real token value that is not an env-var name", () => {
+      expect(
+        scanC('api_key = "sk-live-Xk9Qm2Lp8Rv4Tn6Wz0Bc";').some((f) => f.ruleId === "keyword-secret")
+      ).toBe(true);
     });
   });
 });

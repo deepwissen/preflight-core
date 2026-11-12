@@ -257,6 +257,46 @@ function isKeywordEchoValue(value: string): boolean {
   );
 }
 
+// Reserved / documentation hosts (RFC 2606 + localhost / loopback). Credentials
+// pointing at these are examples, not real endpoints — `john.doe:pw@proxy.example.com`,
+// `mongodb://user:pass@localhost`. Used to drop url-embedded / connection-string FPs.
+const DOC_HOST =
+  /(^|\.)(example\.(com|org|net|edu)|test|invalid|local|localhost)$|^(localhost|127\.0\.0\.1|0\.0\.0\.0|::1)$/i;
+
+/** The host portion of a URI/connection string that embeds credentials (the
+ *  hostname run right after `@`). Restricted to hostname characters so a trailing
+ *  quote/port/path doesn't contaminate it. Empty if there's no `user:pass@host`. */
+function hostFromCreds(match: string): string {
+  const m = match.match(/@([A-Za-z0-9.-]+)/);
+  return m ? m[1] : "";
+}
+
+// An all-UPPER screaming-snake identifier (≥1 underscore) assigned as a value is
+// an env-var *name* being referenced, not a literal secret — `X = "GCM_AZREPOS_SP_SECRET"`.
+// Real keys aren't pure [A-Z0-9_] identifiers (and AWS keys have no underscore).
+function isEnvVarNameValue(value: string): boolean {
+  const v = value.trim();
+  return v.length <= 60 && /^[A-Z][A-Z0-9]*(_[A-Z0-9]+)+$/.test(v);
+}
+
+// A near-monotonic character run (ABC…XYZ, 0123456789…, abcdef…). Scores high
+// Shannon entropy (uniform distribution) but is an obvious filler, not a secret.
+function isSequentialRun(value: string): boolean {
+  if (value.length < 8) return false;
+  let adjacent = 0;
+  for (let i = 1; i < value.length; i++) {
+    const d = value.charCodeAt(i) - value.charCodeAt(i - 1);
+    if (d === 1 || d === -1) adjacent++;
+  }
+  return adjacent / (value.length - 1) >= 0.8;
+}
+
+// A .NET assembly `PublicKeyToken` is a public identity token (like a Stripe
+// publishable key), not a secret — e.g. publicKeyToken="b77a5c561934e089".
+function isPublicKeyTokenField(keyName: string): boolean {
+  return /publickeytoken/i.test(keyName.replace(/[-_]/g, ""));
+}
+
 // ─── Layer 3: Shannon Entropy ────────────────────────────────────
 
 export function shannonEntropy(str: string): number {
@@ -472,13 +512,19 @@ export function scanSecrets(
         // comma) never appears in a credential. (Unquoted path only; base64 secrets
         // using / + = are unaffected.)
         const isCodeExpr = quotedMatch === null && /->|::|[;(){}[\]<>]|,\s*$/.test(value);
+        // .NET PublicKeyToken is a public identity token; a screaming-snake value is
+        // an env-var *name* reference, not a literal secret (CredData false alarms).
+        const isPublicToken = isPublicKeyTokenField(keyName);
+        const isEnvRef = isEnvVarNameValue(value);
         if (
           !isPlaceholder(value) &&
           !isFieldEcho &&
           !isProse &&
           !isVariable &&
           !inArn &&
-          !isCodeExpr
+          !isCodeExpr &&
+          !isPublicToken &&
+          !isEnvRef
         ) {
           const lifetime = classifyLifetime("keyword-secret", value);
           secretFindings.push({
@@ -512,6 +558,12 @@ export function scanSecrets(
           // URL creds whose password is a variable (${GH_TOKEN}, {{var}}, …) are
           // not a literal secret — skip (standard CI/templated pattern).
           if (id === "url-embedded-credentials" && csMatch[1] && isInterpolation(csMatch[1])) {
+            continue;
+          }
+          // Credentials pointing at a reserved / documentation host (example.com,
+          // localhost, …) are examples, not real endpoints — skip (CredData FPs).
+          const credHost = hostFromCreds(csMatch[0]);
+          if (credHost && DOC_HOST.test(credHost)) {
             continue;
           }
           const lifetime = classifyLifetime(id, csMatch[0]);
@@ -556,6 +608,7 @@ export function scanSecrets(
       const value = qMatch[1];
       if (isNonSecretValue(value)) continue;
       if (isPlaceholder(value)) continue;
+      if (isSequentialRun(value)) continue; // ABC…XYZ / 012345… — high entropy, not a secret
       if (value.length < MIN_ENTROPY_LENGTH) continue;
 
       const entropy = shannonEntropy(value);
