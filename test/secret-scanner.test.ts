@@ -1482,4 +1482,37 @@ describe("scanSecrets — false-positive guards", () => {
       ).toBe(true);
     });
   });
+
+  // ─── Short passwords + new provider rules (engine 0.1.24 benchmark) ──
+  describe("short passwords, PASETO/NKEY/salt/oauth", () => {
+    const scanC = (content: string, path = "src/app.cs") =>
+      scanSecrets(makeSnapshot({ activeFile: fileWithContent(content, path) }), {}).secretFindings ??
+      [];
+
+    it("flags short real passwords (≥4 chars), still skips junk and 1-3 char values", () => {
+      expect(scanC('{ "password": "brcsn" }', "a.json").length).toBeGreaterThan(0);
+      expect(scanC('pass = "ywriv"').length).toBeGreaterThan(0);
+      expect(scanC('password = "ab12"').length).toBeGreaterThan(0);
+      expect(scanC('{ "password": "root" }', "a.json")).toHaveLength(0); // junk
+      expect(scanC('password = "test"')).toHaveLength(0); // junk
+      expect(scanC('password = "ab"')).toHaveLength(0); // <4
+      expect(scanC('password = "https://x.com/cb"')).toHaveLength(0); // URL, not a password
+    });
+
+    it("still skips bare-word echoes on non-password fields (token: access_token)", () => {
+      expect(scanC("token: access_token", "a.yaml")).toHaveLength(0);
+    });
+
+    it("detects PASETO tokens and NATS NKEY seeds (gitleaks catches 0%)", () => {
+      expect(scanC('const t = "v2.local.AAAAAAAAAAbbbbbbbbbb"')[0]?.ruleId).toBe("paseto");
+      expect(
+        scanC('seed = "SUAEXAMPLE234567ABCDEFGH234567ABCDEFGH234567ABCDEFGH23"')[0]?.ruleId
+      ).toBe("nkey-seed");
+    });
+
+    it("detects salt and oauth_signature values", () => {
+      expect(scanC('salt = "2e1f3a9c8b7d6e5f0a1b2c3d"').length).toBeGreaterThan(0);
+      expect(scanC('oauth_signature="tnnArxj06cWHq44gCs1OSKk%2FjLY%3D"').length).toBeGreaterThan(0);
+    });
+  });
 });

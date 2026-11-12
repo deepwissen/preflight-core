@@ -34,6 +34,11 @@ const PROVIDER_PREFIXES = [
         label: "JSON Web Token",
         pattern: /eyJ[A-Za-z0-9_-]{8,}\.eyJ[A-Za-z0-9_-]{6,}\.[A-Za-z0-9_-]{6,}/,
     },
+    // PASETO token: v1–v4 . local|public . payload — a distinctive prefix no other
+    // format shares. gitleaks catches 0% of these.
+    { id: "paseto", label: "PASETO Token", pattern: /\bv[1-4]\.(local|public)\.[A-Za-z0-9_-]{10,}/ },
+    // NATS NKEY seed: `S` (seed) + role letter (U/A/O/N/C) + base32, 56 more chars.
+    { id: "nkey-seed", label: "NATS NKEY Seed", pattern: /\bS[AOUNC][A-Z2-7]{48,}\b/ },
 ];
 // ─── Layer 2: Keyword + Assignment ───────────────────────────────
 // Quoted values — works in any language. Bare `key` catches app_key/encryption_key/
@@ -41,9 +46,9 @@ const PROVIDER_PREFIXES = [
 // public keys are filtered after the match by isEnglishKeyWord / isPublicKeyField.
 // The optional closing quote after the keyword matches JSON (`"token": "…"`) — a
 // big gap, since JSON quotes the key and `token:` never followed `"token"`.
-const KEYWORD_PATTERN = /\b(\w*(?:password|passwd|pwd|pass|secret|token|api_key|apikey|auth_key|private_key|access_key|secret_key|key|conn_str|connection_string))["'`]?\s*[:=]>?\s*["'`]([^"'`\n]{1,200})["'`]/i;
+const KEYWORD_PATTERN = /\b(\w*(?:password|passwd|pwd|pass|secret|token|api_key|apikey|auth_key|private_key|access_key|secret_key|key|salt|oauth_signature|oauth_nonce|oauth_verifier|conn_str|connection_string))["'`]?\s*[:=]>?\s*["'`]([^"'`\n]{1,200})["'`]/i;
 // Unquoted values — for YAML, .properties, .ini, .env, TOML, config files
-const KEYWORD_UNQUOTED_PATTERN = /\b(\w*(?:password|passwd|pwd|pass|secret|token|api_key|apikey|auth_key|private_key|access_key|secret_key|key|conn_str|connection_string))["'`]?\s*[:=]\s*(\S+)\s*$/i;
+const KEYWORD_UNQUOTED_PATTERN = /\b(\w*(?:password|passwd|pwd|pass|secret|token|api_key|apikey|auth_key|private_key|access_key|secret_key|key|salt|oauth_signature|oauth_nonce|oauth_verifier|conn_str|connection_string))["'`]?\s*[:=]\s*(\S+)\s*$/i;
 const UNQUOTED_VALUE_LANGUAGES = new Set([
     "yaml",
     "properties",
@@ -186,6 +191,13 @@ function shouldSkipFile(path, contentLength) {
 const ENTROPY_SKIP_FILE = /\.(svg|map|html?|classpath|project|iml)$|\.min\.(js|css)$|(^|\/)(package-lock\.json|yarn\.lock|pnpm-lock\.ya?ml)$|(^|\/)\.idea\/|(^|\/)\.settings\//i;
 function skipEntropyForFile(path) {
     return ENTROPY_SKIP_FILE.test(path);
+}
+// A URL, absolute path, or version number assigned to a credential field — a
+// reference, not a literal secret. Unlike the bare-word part of the field-echo
+// guard, this applies to password fields too (a password is never a URL/path).
+function isUrlPathVersionValue(value) {
+    const v = value.trim();
+    return /^https?:\/\//.test(v) || /^\/[\w-]/.test(v) || /^\d+(\.\d+)*$/.test(v);
 }
 // A keyword value that is a bare alphabetic word (no digits/symbols), a URL, a
 // path, or a version is a field echo / identifier / placeholder — not a literal
@@ -647,12 +659,15 @@ export function scanSecrets(context, _partial) {
                 const inUrl = quotedMatch === null && /:\/\//.test(line.slice(0, kwMatch.index));
                 if (inUrl)
                     value = value.split(/[&#\s]/)[0].replace(/^["'`]+|["'`]+$/g, "");
-                // The field-echo guard (bare word / URL / path / version) applies to quoted
-                // values in code. Unquoted config values are real secrets even when short
-                // (`ml_ref_password: vale`), EXCEPT when the value just echoes a credential
-                // field name (`token: access_token`) — that carries no secret.
-                const isFieldEcho = (quotedMatch !== null && isNonSecretKeywordValue(value)) ||
-                    (quotedMatch === null && isKeywordEchoValue(value));
+                const isPwdField = /pass|pwd/i.test(keyName);
+                // The field-echo guard skips bare-word / URL / path / version values — BUT
+                // for password fields a bare word IS a real (weak) password (`"password":
+                // "brcsn"`), so there we skip only URL/path/version, not bare words. Obvious
+                // junk (root/test/changeme) is still dropped by the placeholder guard.
+                const isFieldEcho = isPwdField
+                    ? isUrlPathVersionValue(value)
+                    : (quotedMatch !== null && isNonSecretKeywordValue(value)) ||
+                        (quotedMatch === null && isKeywordEchoValue(value));
                 // The keyword also appears in prose (`echo "... add as secret:"`) where the
                 // unquoted "value" is just a stray quote/punctuation — not credential-shaped.
                 const stripped = value.replace(/^["'`]+|["'`]+$/g, "").trim();
@@ -683,13 +698,11 @@ export function scanSecrets(context, _partial) {
                 const isTestFixture = isTestFixtureField(keyName);
                 // The value is a multi-word code identifier (keyEquivalentModifierMask).
                 const isCodeIdent = isCodeIdentifierValue(value);
-                // Password-family fields stay permissive (weak real passwords are short and
-                // low-entropy, and vet leads gitleaks here). For key/token/secret/api fields,
-                // require a credential-shaped value: ≥8 chars (gitleaks' floor) and not a
-                // bare primitive type name (Go struct tags `key:"uint32"`). This cuts the
-                // short/structural keyword false alarms without touching passwords.
-                const isPwdField = /pass|pwd/i.test(keyName);
-                const tooShort = !isPwdField && value.trim().length < 8;
+                // Length floor: non-password fields require ≥8 chars (gitleaks' generic
+                // floor); password fields only ≥4 (real passwords are short — this recovers
+                // ~1,584 CredData passwords the old 8-char rule hid). Junk is handled by the
+                // placeholder guard.
+                const tooShort = value.trim().length < (isPwdField ? 4 : 8);
                 const isPrimitiveType = /^(u?int(8|16|32|64)?|float(32|64)?|string|bool(ean)?|byte|rune|char|double|long|short|object|void|any|date(time)?|guid|uuid)$/i.test(value.trim());
                 // Randomness slice: on non-password fields, a short all-letter value is a
                 // word/identifier, not a credential (`ClientSecret = "Whatever;"`, `key:
