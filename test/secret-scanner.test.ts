@@ -1519,6 +1519,37 @@ describe("scanSecrets — false-positive guards", () => {
     });
   });
 
+  // ─── Keyword-value noise filters (noise benchmark, engine 0.1.27) ──
+  describe("keyword-value noise guards", () => {
+    const scanC = (content: string, path = "src/app.cs") =>
+      scanSecrets(makeSnapshot({ activeFile: fileWithContent(content, path) }), {}).secretFindings ??
+      [];
+
+    it("skips __WRAPPED__ snapshot placeholders and npm: version specs", () => {
+      expect(scanC('{ "streamName": "__ExclusiveStartStreamName__" }', "a.json")).toHaveLength(0);
+      expect(scanC('{ "minipass": "npm:^7.0.3" }', "yarn.lock")).toHaveLength(0);
+    });
+
+    it("skips test-fixture VALUES (testpw, fake_hash, mockToken)", () => {
+      expect(scanC('password = "testpw"')).toHaveLength(0);
+      expect(scanC('hash = "fake_hash"')).toHaveLength(0);
+      expect(scanC('token = "mockToken"')).toHaveLength(0);
+      // but a real word that merely starts with 'test' is NOT skipped
+      expect(scanC('secret = "testamentXy9Qz2"').length).toBeGreaterThan(0);
+    });
+
+    it("skips trivial API example values (token123, id1), repeated-char tokens", () => {
+      expect(scanC('{ "nextToken": "token123" }', "a.json")).toHaveLength(0);
+      expect(scanC('{ "id": "id1" }', "a.json")).toHaveLength(0);
+      expect(scanC('{ "clientToken": "1111111111111111" }', "a.json")).toHaveLength(0);
+    });
+
+    it("STILL flags real credentials (not example/test-shaped)", () => {
+      expect(scanC('db_password = "Sum2026!xZ"').length).toBeGreaterThan(0);
+      expect(scanC('api_token = "a8K3mZp9Qw2LxNvB7yH4"').length).toBeGreaterThan(0);
+    });
+  });
+
   // ─── Structural keyword false alarms (engine 0.1.22 benchmark) ──
   describe("structural-value guards", () => {
     const scanC = (content: string, path = "src/app.go") =>

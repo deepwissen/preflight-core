@@ -198,8 +198,11 @@ const PLACEHOLDER_PATTERNS = [
     // A masked value ('password': '********') — a redaction, not a secret.
     /^[*•●∗•●]{3,}$/,
     // A version / semver range (package.json deps: "getpass": "^0.1.1", "~2.2.1",
-    // ">=1.0.0", "1.2.3") — a dependency spec on a *pass/*key-named package, not a secret.
-    /^[~^>=<\s]*v?\d+\.\d+(\.\d+)?([-+.][\w.]+)?$/,
+    // ">=1.0.0", "1.2.3") — a dependency spec on a *pass/*key-named package, not a
+    // secret. The optional `<protocol>:` prefix matches yarn-lock specs (npm:^7.0.3).
+    /^([a-z][\w.+-]*:)?[~^>=<\s]*v?\d+\.\d+(\.\d+)?([-+.][\w.]+)?$/i,
+    // A __WRAPPED__ placeholder — test snapshots / codegen (__ExclusiveStartStreamName__).
+    /^__\w+__$/,
 ];
 function isPlaceholder(value) {
     return PLACEHOLDER_PATTERNS.some((p) => p.test(value.trim()));
@@ -411,6 +414,19 @@ function isPublicKeyField(keyName) {
 function isDottedIdentifierValue(value) {
     const v = value.trim();
     return v.length < 60 && /^[A-Za-z][A-Za-z_]*(\.[A-Za-z][A-Za-z_]*)+$/.test(v);
+}
+// A VALUE that is itself a test/fixture marker — `password = "testpw"`,
+// `hash = "fake_hash"`, `token = "mockToken"`. The test-fixture guard checks the
+// field NAME; this checks the value. Scoped: a test word + a credential-ish word,
+// digit, or end — so a real word like "testament" is NOT skipped.
+function isTestValue(value) {
+    return /^(test|fake|mock|dummy|sample|fixture|stub)[_-]?(pw|pass(word)?|hash|key|token|secret|value|data|cred(ential)?s?|[0-9]|$)/i.test(value.trim());
+}
+// A trivial example value common in AWS/API model files — a field-echo word with
+// optional trailing digits (`"nextToken": "token123"`, `"id": "id1"`). Repeated-
+// char examples ("1111…") are already caught by the randomness gate.
+function isExampleValue(value) {
+    return /^(token|key|secret|id|value|name|next|client|request|example|sample|string|foo|bar|baz)\d{0,4}$/i.test(value.trim());
 }
 // For non-password keyword fields only: a short all-letter value is a word or
 // identifier, not a credential (`key: Corefile`, `ClientSecret = "Whatever;"`).
@@ -835,6 +851,9 @@ export function scanSecrets(context, _partial) {
                 // enough is a word/name/slug, not a credential (`server-2`, `Whatever`).
                 // Passwords are exempt — real passwords are often low-entropy (vet's edge).
                 const isNotRandom = !isPwdField && !looksRandom(value);
+                // Test-fixture value (testpw/fake_hash) or a trivial API example value
+                // (token123) — not a real credential. (From the noise benchmark.)
+                const isExampleOrTest = isTestValue(value) || (!isPwdField && isExampleValue(value));
                 if (!isPlaceholder(value) &&
                     !isFieldEcho &&
                     !isProse &&
@@ -853,7 +872,8 @@ export function scanSecrets(context, _partial) {
                     !isWordValue &&
                     !isNonAscii &&
                     !isStructural &&
-                    !isNotRandom) {
+                    !isNotRandom &&
+                    !isExampleOrTest) {
                     const lifetime = classifyLifetime("keyword-secret", value);
                     secretFindings.push({
                         id: `keyword-${keyName}-${file.path}-${i + 1}`,
