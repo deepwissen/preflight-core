@@ -1293,4 +1293,44 @@ describe("scanSecrets — false-positive guards", () => {
       expect(scanC('const p = "C:\\\\build\\\\bin\\\\Release\\\\app.pdb";')).toHaveLength(0);
     });
   });
+
+  // ─── Authorization header credentials (the ~800-secret gap no tool caught) ──
+  describe("auth-header detection", () => {
+    const scanC = (content: string, path = "src/app.cs") =>
+      scanSecrets(makeSnapshot({ activeFile: fileWithContent(content, path) }), {}).secretFindings ??
+      [];
+    // dXNlcjpwYXNzd29yZA== === base64("user:password")
+
+    it("flags Basic / Bearer / NTLM Authorization credentials", () => {
+      expect(scanC("Authorization: Basic dXNlcjpwYXNzd29yZA==")[0]?.ruleId).toBe("auth-header-basic");
+      expect(scanC("Authorization: Bearer a1b2c3d4e5f6g7h8i9j0")[0]?.ruleId).toBe(
+        "auth-header-bearer"
+      );
+      expect(scanC("Authorization: NTLM TlRMTVNTUAABAAAAB4IIAAA=")[0]?.ruleId).toBe(
+        "auth-header-ntlm"
+      );
+      expect(scanC('Proxy-Authorization: "Basic dXNlcjpwYXNzd29yZA=="')[0]?.ruleId).toBe(
+        "auth-header-basic"
+      );
+    });
+
+    it("does NOT flag placeholder / variable tokens", () => {
+      expect(scanC("Authorization: Bearer ${ACCESS_TOKEN}")).toHaveLength(0);
+      expect(scanC("Authorization: Bearer <access_token>")).toHaveLength(0);
+      expect(scanC("Authorization: Bearer YOUR_TOKEN_HERE")).toHaveLength(0);
+      expect(scanC("Authorization: Bearer token")).toHaveLength(0); // too short / bare word
+    });
+
+    it("rejects Basic values that don't decode to user:pass", () => {
+      expect(scanC("Authorization: Basic YWJjZGVmZ2hpams=")).toHaveLength(0);
+    });
+
+    it("attributes a Bearer JWT to the jwt rule, not a double finding", () => {
+      const jwt =
+        "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjMifQ.SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJV";
+      const f = scanC(`Authorization: Bearer ${jwt}`);
+      expect(f).toHaveLength(1);
+      expect(f[0].ruleId).toBe("jwt");
+    });
+  });
 });

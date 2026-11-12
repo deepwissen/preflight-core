@@ -307,6 +307,28 @@ function isCodeIdentifierValue(value) {
     const v = value.trim();
     return /^[A-Za-z]+$/.test(v) && (v.match(/[a-z][A-Z]/g) ?? []).length >= 2;
 }
+// HTTP Authorization header credentials — `Authorization: Basic|Bearer|NTLM <cred>`.
+// A large class of real secrets (CredData) that the keyword/provider layers miss.
+// Variable tokens (${T}, <token>, $VAR) are excluded by the credential charset,
+// which admits only base64url characters. Group 1 = scheme, group 2 = credential.
+const AUTH_HEADER = /\b(?:proxy-)?authorization\s*[:=]\s*["'`]?\s*(basic|bearer|ntlm|negotiate)\s+([A-Za-z0-9+/=._~-]{8,})/i;
+// Decode a base64 Basic credential; returns the `user:pass` string, or null if it
+// isn't valid base64 / doesn't decode to text. Used to confirm a real Basic header
+// (decodes to `user:pass`) and reject random base64 that merely looks like one.
+function decodeBasic(b64) {
+    if (!/^[A-Za-z0-9+/]+={0,2}$/.test(b64))
+        return null;
+    try {
+        const s = typeof atob === "function"
+            ? atob(b64)
+            : // eslint-disable-next-line no-undef
+                Buffer.from(b64, "base64").toString("latin1");
+        return /^[\x20-\x7e]*$/.test(s) ? s : null; // printable ASCII only
+    }
+    catch {
+        return null;
+    }
+}
 // ─── Layer 3: Shannon Entropy ────────────────────────────────────
 export function shannonEntropy(str) {
     if (str.length === 0)
@@ -471,6 +493,47 @@ export function scanSecrets(context, _partial) {
                 });
                 flaggedLines.add(i);
                 break; // One finding per line for Layer 1
+            }
+        }
+        // Layer 1b: Authorization header credentials (Basic/Bearer/NTLM). Runs after
+        // Layer 1 so a `Bearer eyJ…` JWT is attributed to the jwt rule, not double-flagged.
+        if (!flaggedLines.has(i)) {
+            const am = AUTH_HEADER.exec(line);
+            if (am) {
+                const scheme = am[1].toLowerCase();
+                const cred = am[2];
+                let detected = !isPlaceholder(cred) && !isEnvVarNameValue(cred) && !isInterpolation(cred);
+                let label = "Authorization credential";
+                if (detected && scheme === "basic") {
+                    const decoded = decodeBasic(cred);
+                    detected = decoded !== null && decoded.includes(":"); // real Basic → user:pass
+                    label = "Basic Authorization credential";
+                }
+                else if (detected && scheme === "bearer") {
+                    detected = cred.length >= 16; // opaque bearer token (JWTs already handled)
+                    label = "Bearer token in Authorization header";
+                }
+                else if (detected) {
+                    detected = cred.length >= 16;
+                    label = `${scheme.toUpperCase()} Authorization credential`;
+                }
+                if (detected) {
+                    const lifetime = classifyLifetime(`auth-header-${scheme}`, cred);
+                    secretFindings.push({
+                        id: `auth-header-${scheme}-${file.path}-${i + 1}`,
+                        filePath: file.path,
+                        lineNumber: i + 1,
+                        ruleId: `auth-header-${scheme}`,
+                        layer: 1,
+                        severity: "warning",
+                        label,
+                        description: `${label} in ${fileName(file.path)} line ${i + 1}`,
+                        matchPreview: redact(cred),
+                        suggestion: suggestionFor(lifetime),
+                        lifetime,
+                    });
+                    flaggedLines.add(i);
+                }
             }
         }
         // Layer 2: Keyword + assignment (quoted or unquoted for config files)
