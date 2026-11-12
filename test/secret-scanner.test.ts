@@ -1332,5 +1332,44 @@ describe("scanSecrets — false-positive guards", () => {
       expect(f).toHaveLength(1);
       expect(f[0].ruleId).toBe("jwt");
     });
+
+    it("flags a standalone `Basic <base64>` (JSON value, no Authorization: prefix)", () => {
+      // ZHR4OnBhc3N3b3Jk === base64("dtx:password")
+      expect(scanC('{ "value": "Basic ZHR4OnBhc3N3b3Jk" }', "a.json")[0]?.ruleId).toBe(
+        "auth-header-basic"
+      );
+      // prose "Basic authentication" must NOT flag (doesn't decode to user:pass)
+      expect(scanC("Basic authentication is required")).toHaveLength(0);
+    });
+  });
+
+  // ─── JSON quoted-key detection + placeholder URL creds (v0.1.11 gaps) ──
+  describe("JSON keyword detection + placeholder URL creds", () => {
+    const scanC = (content: string, path = "config.json") =>
+      scanSecrets(makeSnapshot({ activeFile: fileWithContent(content, path) }), {}).secretFindings ??
+      [];
+
+    it('detects quoted JSON keys ("token": "…", "password": "…")', () => {
+      expect(scanC('{ "token": "550e8400-e29b-41d4-a716-446655440000" }').length).toBeGreaterThan(0);
+      expect(scanC('{ "password": "Sup3rS3cr3tVal" }').length).toBeGreaterThan(0);
+      expect(scanC('{ "api_key": "a3f9c2e81b7d4056af12cd34" }').length).toBeGreaterThan(0);
+    });
+
+    it("does NOT flag structural / non-secret JSON pairs", () => {
+      expect(scanC('{ "name": "John Doe" }')).toHaveLength(0);
+      expect(scanC('{ "type": "string" }')).toHaveLength(0);
+      expect(scanC('{ "key": "id" }')).toHaveLength(0); // short value
+    });
+
+    it("does NOT flag placeholder passwords in URL credentials", () => {
+      expect(scanC('u = "http://minio:changeme@storage:9000"', "a.yaml")).toHaveLength(0);
+      expect(scanC('u = "http://user:password@host:8080"', "a.md")).toHaveLength(0);
+      // but a real password at a real host still flags
+      expect(
+        scanC('u = "http://admin:Pr0dP8ssxyz@db.acme.io"', "a.cs").some(
+          (f) => f.ruleId === "url-embedded-credentials"
+        )
+      ).toBe(true);
+    });
   });
 });

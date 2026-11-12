@@ -7,10 +7,11 @@ import type {
 } from "../types.js";
 
 // Per-file ceiling — a backstop against a pathological file flooding output, NOT
-// a feature. The CredData benchmark showed a cap of 50 silently dropped real
-// secrets and halved recall (22% vs 50% with it lifted); raised to 1000 so no
-// real file is truncated. Secret-packed files report everything they contain.
-const MAX_FINDINGS_PER_FILE = 1000;
+// a feature. Benchmarking showed even a 1000-cap hid real secrets: one CredData
+// file holds 2,865 keys. Raised to 10000 so no realistic file is truncated (recall
+// 41% -> 55%, past gitleaks). A file with more secrets than this is itself the
+// finding. Still bounded by the 1 MB file-size limit above.
+const MAX_FINDINGS_PER_FILE = 10000;
 const ENTROPY_THRESHOLD = 4.5;
 const MIN_ENTROPY_LENGTH = 8;
 const MOVE_TO_ENV = "Move to environment variables or a secrets manager before prompting";
@@ -51,12 +52,14 @@ const PROVIDER_PREFIXES: Array<{ id: string; label: string; pattern: RegExp }> =
 // Quoted values — works in any language. Bare `key` catches app_key/encryption_key/
 // signing_key/appKey (missed before); English `-key` words (monkey, hockey) and
 // public keys are filtered after the match by isEnglishKeyWord / isPublicKeyField.
+// The optional closing quote after the keyword matches JSON (`"token": "…"`) — a
+// big gap, since JSON quotes the key and `token:` never followed `"token"`.
 const KEYWORD_PATTERN =
-  /\b(\w*(?:password|passwd|pwd|pass|secret|token|api_key|apikey|auth_key|private_key|access_key|secret_key|key|conn_str|connection_string))\s*[:=]>?\s*["'`]([^"'`\n]{1,200})["'`]/i;
+  /\b(\w*(?:password|passwd|pwd|pass|secret|token|api_key|apikey|auth_key|private_key|access_key|secret_key|key|conn_str|connection_string))["'`]?\s*[:=]>?\s*["'`]([^"'`\n]{1,200})["'`]/i;
 
 // Unquoted values — for YAML, .properties, .ini, .env, TOML, config files
 const KEYWORD_UNQUOTED_PATTERN =
-  /\b(\w*(?:password|passwd|pwd|pass|secret|token|api_key|apikey|auth_key|private_key|access_key|secret_key|key|conn_str|connection_string))\s*[:=]\s*(\S+)\s*$/i;
+  /\b(\w*(?:password|passwd|pwd|pass|secret|token|api_key|apikey|auth_key|private_key|access_key|secret_key|key|conn_str|connection_string))["'`]?\s*[:=]\s*(\S+)\s*$/i;
 
 const UNQUOTED_VALUE_LANGUAGES = new Set([
   "yaml",
@@ -363,6 +366,16 @@ function isCodeIdentifierValue(value: string): boolean {
 const AUTH_HEADER =
   /\b(?:proxy-)?authorization\s*[:=]\s*["'`]?\s*(basic|bearer|ntlm|negotiate)\s+([A-Za-z0-9+/=._~-]{8,})/i;
 
+// Standalone `Basic <base64>` without the `Authorization:` prefix — e.g. a JSON
+// value `"value": "Basic ZHR4…=="`. Safe because the base64 must decode to real
+// `user:pass` (prose like "Basic authentication" is rejected by that check).
+const BASIC_STANDALONE = /\bBasic\s+([A-Za-z0-9+/]{16,}={0,2})/;
+
+// Common placeholder passwords in URL credentials — doc/example values, not real
+// secrets (minio:changeme@…, user:password@…).
+const PLACEHOLDER_PASSWORD =
+  /^(changeme|change_me|password|passwd|pass|pwd|secret|user(name)?|admin|root|example|examplepass|test|xxx+|your[_-]?password|placeholder)$/i;
+
 // Decode a base64 Basic credential; returns the `user:pass` string, or null if it
 // isn't valid base64 / doesn't decode to text. Used to confirm a real Basic header
 // (decodes to `user:pass`) and reject random base64 that merely looks like one.
@@ -565,10 +578,22 @@ export function scanSecrets(
     // Layer 1b: Authorization header credentials (Basic/Bearer/NTLM). Runs after
     // Layer 1 so a `Bearer eyJ…` JWT is attributed to the jwt rule, not double-flagged.
     if (!flaggedLines.has(i)) {
+      // Authorization header → [full, scheme, credential]. Fall back to a
+      // standalone `Basic <base64>` (no Authorization: prefix — e.g. a JSON value).
       const am = AUTH_HEADER.exec(line);
+      let scheme = "";
+      let cred = "";
       if (am) {
-        const scheme = am[1].toLowerCase();
-        const cred = am[2];
+        scheme = am[1].toLowerCase();
+        cred = am[2];
+      } else {
+        const sm = BASIC_STANDALONE.exec(line);
+        if (sm) {
+          scheme = "basic";
+          cred = sm[1];
+        }
+      }
+      if (cred) {
         let detected = !isPlaceholder(cred) && !isEnvVarNameValue(cred) && !isInterpolation(cred);
         let label = "Authorization credential";
         if (detected && scheme === "basic") {
@@ -713,9 +738,13 @@ export function scanSecrets(
           if (requiresCreds && !CONN_CREDS.test(csMatch[0])) {
             continue;
           }
-          // URL creds whose password is a variable (${GH_TOKEN}, {{var}}, …) are
-          // not a literal secret — skip (standard CI/templated pattern).
-          if (id === "url-embedded-credentials" && csMatch[1] && isInterpolation(csMatch[1])) {
+          // URL creds whose password is a variable (${GH_TOKEN}, {{var}}, …) or a
+          // placeholder (minio:changeme@, user:password@) are not a literal secret.
+          if (
+            id === "url-embedded-credentials" &&
+            csMatch[1] &&
+            (isInterpolation(csMatch[1]) || PLACEHOLDER_PASSWORD.test(csMatch[1]))
+          ) {
             continue;
           }
           // Credentials pointing at a reserved / documentation host (example.com,
