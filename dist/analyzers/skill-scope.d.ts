@@ -27,6 +27,8 @@ export interface SkillScope {
     tools: ToolGrant[];
     broad: boolean;
     broadGrants: string[];
+    mcpServers: string[];
+    referencedScripts: string[];
 }
 /** Skill/command/agent files that can declare a tool scope in frontmatter. */
 export declare function isSkillScopeFile(path: string): boolean;

@@ -3,10 +3,12 @@ const SKILL_PATH = /(^|\/)skill\.md$|(^|\/)\.claude\/(skills|commands|agents)\/.
 export function isSkillScopeFile(path) {
     return SKILL_PATH.test(path.toLowerCase());
 }
-/** Extract the leading YAML frontmatter block (--- … ---) as raw text, or null. */
-function frontmatterBlock(content) {
+/** Split a file into its leading YAML frontmatter block (--- … ---) and the body. */
+function splitFrontmatter(content) {
     const m = /^\uFEFF?\s*---[ \t]*\r?\n([\s\S]*?)\r?\n---[ \t]*(?:\r?\n|$)/.exec(content);
-    return m ? m[1] : null;
+    if (!m)
+        return { fm: null, body: content };
+    return { fm: m[1], body: content.slice(m.index + m[0].length) };
 }
 /** Read an inline scalar value for `key:` from frontmatter, stripping quotes. */
 function scalar(fm, key) {
@@ -86,6 +88,31 @@ function isBroadGrant(g) {
         return g.arg === null || g.arg === "*" || g.arg === ":*";
     return false;
 }
+/** The MCP server a grant reaches, parsed from an `mcp__<server>__<tool>` name. */
+function mcpServerOf(tool) {
+    if (!tool.startsWith("mcp__"))
+        return null;
+    const rest = tool.slice(5);
+    const i = rest.indexOf("__");
+    return (i === -1 ? rest : rest.slice(0, i)) || null;
+}
+// Scripts the body instructs the agent to run — via an interpreter
+// (`bash scripts/x.sh`, `python ./setup.py`) or a direct relative path (`./run.sh`).
+// Conservative by design (manifest metadata, not a finding); a bundled-file walk by
+// the CLI enumerates what actually ships more precisely.
+const SCRIPT_EXT = "(?:sh|bash|zsh|py|rb|pl|js|cjs|mjs|ts)";
+const INTERP_REF = new RegExp(`\\b(?:bash|sh|zsh|python3?|ruby|perl|node|npx|deno)\\s+((?:\\.{0,2}/)?[\\w./-]+\\.${SCRIPT_EXT})\\b`, "g");
+const PATH_REF = new RegExp(`(?:^|[\\s\`'"(])(\\.{1,2}/[\\w./-]*\\.${SCRIPT_EXT})\\b`, "g");
+function extractScriptRefs(body) {
+    const found = new Set();
+    for (const re of [INTERP_REF, PATH_REF]) {
+        re.lastIndex = 0;
+        let m;
+        while ((m = re.exec(body)) !== null)
+            found.add(m[1]);
+    }
+    return [...found];
+}
 /** Parse a skill/command/agent file's declared tool scope from its frontmatter. */
 export function extractSkillScope(path, content) {
     const base = {
@@ -96,17 +123,21 @@ export function extractSkillScope(path, content) {
         tools: [],
         broad: false,
         broadGrants: [],
+        mcpServers: [],
+        referencedScripts: [],
     };
     if (!isSkillScopeFile(path))
         return base;
-    const fm = frontmatterBlock(content);
+    const { fm, body } = splitFrontmatter(content);
+    const referencedScripts = extractScriptRefs(body);
     if (fm === null)
-        return { ...base, isSkill: true };
+        return { ...base, isSkill: true, referencedScripts };
     const { present, grants } = parseAllowedTools(fm);
-    const tools = grants
-        .map(parseGrant)
-        .filter((g) => g !== null);
+    const tools = grants.map(parseGrant).filter((g) => g !== null);
     const broadGrants = tools.filter(isBroadGrant).map((g) => g.raw);
+    const mcpServers = [
+        ...new Set(tools.map((t) => mcpServerOf(t.tool)).filter((s) => s !== null)),
+    ];
     return {
         isSkill: true,
         name: scalar(fm, "name"),
@@ -115,6 +146,8 @@ export function extractSkillScope(path, content) {
         tools,
         broad: broadGrants.length > 0,
         broadGrants,
+        mcpServers,
+        referencedScripts,
     };
 }
 function fileName(path) {

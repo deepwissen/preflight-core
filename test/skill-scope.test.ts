@@ -83,6 +83,50 @@ describe("extractSkillScope — over-broad detection", () => {
   });
 });
 
+describe("extractSkillScope — MCP servers (Phase 1.1)", () => {
+  it("collects unique MCP servers from mcp__server__tool grants", () => {
+    const s = extractSkillScope(
+      "SKILL.md",
+      fm("allowed-tools: Read, mcp__aws__deploy, mcp__aws__status, mcp__github__pr")
+    );
+    expect(s.mcpServers).toEqual(["aws", "github"]);
+    expect(s.broad).toBe(false); // MCP grants are not over-broad
+  });
+  it("handles a whole-server grant (mcp__server with no tool)", () => {
+    const s = extractSkillScope("SKILL.md", fm("allowed-tools: mcp__linear"));
+    expect(s.mcpServers).toEqual(["linear"]);
+  });
+  it("is empty when no MCP grants are present", () => {
+    expect(extractSkillScope("SKILL.md", fm("allowed-tools: Read, Bash(git diff:*)")).mcpServers).toEqual(
+      []
+    );
+  });
+});
+
+describe("extractSkillScope — referenced scripts (Phase 1.1)", () => {
+  it("finds scripts run via an interpreter", () => {
+    const s = extractSkillScope(
+      "SKILL.md",
+      fm("name: x") + "First run `bash scripts/deploy.sh`, then `python ./setup.py`.\n"
+    );
+    expect(s.referencedScripts).toContain("scripts/deploy.sh");
+    expect(s.referencedScripts).toContain("./setup.py");
+  });
+  it("finds scripts run via a direct relative path", () => {
+    const s = extractSkillScope("SKILL.md", fm("name: x") + "Execute ./run.sh to start.\n");
+    expect(s.referencedScripts).toContain("./run.sh");
+  });
+  it("extracts scripts even with no frontmatter", () => {
+    const s = extractSkillScope("SKILL.md", "Just run `bash ./tools/go.sh` please.\n");
+    expect(s.isSkill).toBe(true);
+    expect(s.referencedScripts).toContain("./tools/go.sh");
+  });
+  it("is empty for prose with no script execution", () => {
+    const s = extractSkillScope("SKILL.md", fm("name: x") + "Summarize the diff and list risks.\n");
+    expect(s.referencedScripts).toEqual([]);
+  });
+});
+
 describe("scanSkillScope — findings", () => {
   it("emits an excessive-agency error for an over-broad skill, at the allowed-tools line", () => {
     const content = fm("name: deployer\nallowed-tools: Bash(*)");
