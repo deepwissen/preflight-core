@@ -4,6 +4,13 @@ export { scanInstructionIntegrity } from "./integrity-scanner.js";
 export { scanMcpConfigs } from "./mcp-scanner.js";
 export { scanAgentConfig } from "./agent-config-scanner.js";
 export {
+  extractSkillScope,
+  scanSkillScope,
+  isSkillScopeFile,
+  type SkillScope,
+  type ToolGrant,
+} from "./skill-scope.js";
+export {
   auditDetectedExposure,
   auditIgnoreCoverage,
   isAiIgnoreFile,
